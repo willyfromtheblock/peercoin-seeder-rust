@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  peercoin-seeder-mainnet:
+    build:
+      context: .
+      dockerfile: Dockerfile.builder
+    container_name: peercoin-seeder-mainnet
+    restart: unless-stopped
+    ports:
+      - "53:53/udp"
+    command: [
+      "--mainnet",
+      "--hostname", "seed.peercoin.net",
+      "--nameserver", "ns.peercoin.net"
+    ]
+    volumes:
+      - "./data/:/data"
+    environment:
+      - RUST_LOG=info
+    cap_add:
+      - NET_BIND_SERVICE
+    healthcheck:
+      test: ["CMD", "dig", "@127.0.0.1", "seed.peercoin.net", "A"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
