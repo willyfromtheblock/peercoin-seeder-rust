@@ -1,0 +1,43 @@
+# Target directory (build artifacts)
+target/
+
+# Database files
+*.db
+*.db-shm
+*.db-wal
+db/
+
+# Data directory
+data/
+
+# Git files
+.git/
+.gitignore
+
+# Documentation (not needed for build)
+*.md
+docker-usage.md
+DEPLOYMENT.md
+
+# Test scripts
+test-*.sh
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files (contain secrets)
+.env*
+
+# Logs
+*.log
+
+# Temporary files
+tmp/
+temp/

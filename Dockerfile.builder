@@ -1,5 +1,5 @@
 # Multi-stage Docker build for cross-compilation
-FROM rust:1.75-bullseye as builder
+FROM rust:1.87-bullseye AS builder
 
 # Install dependencies for SQLite
 RUN apt-get update && apt-get install -y \
