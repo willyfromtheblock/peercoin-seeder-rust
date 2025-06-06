@@ -1,16 +1,16 @@
 services:
-  peercoin-seeder:
+  peercoin-seeder-rust:
     build:
       context: .
       dockerfile: Dockerfile.builder
-    container_name: peercoin-seeder
+    container_name: peercoin-seeder-rust
     restart: always
     env_file:
       - .env
     ports:
       - "53:53/udp"
     command: >
-      sh -c "peercoin-seeder
+      sh -c "peercoin-seeder-rust
       $${NETWORK_FLAG:---mainnet}
       --hostname $${HOSTNAME:-seed.peercoin.net}
       --nameserver $${NAMESERVER:-ns.peercoin.net}
