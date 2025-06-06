@@ -143,7 +143,7 @@ async fn main() {
     if let Err(e) = std::fs::create_dir_all("db") {
         crate::log_error!("Failed to create db directory: {}", e);
     }
-    
+
     let database_path = format!("db/nodes_{}.db", config.network.to_string().to_lowercase());
     if let Err(e) = seeder.init_database(&database_path).await {
         crate::log_error!("Failed to initialize database: {}", e);

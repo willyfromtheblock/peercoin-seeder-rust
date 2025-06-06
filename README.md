@@ -1,52 +1,100 @@
-# Peercoin DNS Seeder in Rust
+# 🌱 Peercoin DNS Seeder
 
-A modern Rust implementation of a DNS seeder for the Peercoin network. This project provides a fully functional DNS server that returns IP addresses of healthy Peercoin network nodes, replacing the need for hardcoded seed nodes.
+<div align="center">
 
-## ✅ Current Status: FULLY FUNCTIONAL
+**A modern, high-performance DNS seeder for the Peercoin network written in Rust**
 
-The DNS seeder is **complete and working**:
-- ✅ **DNS Server**: Returns real IP addresses of good Peercoin nodes
-- ✅ **Network Crawler**: Discovers and validates nodes across the network  
-- ✅ **Node Quality Filtering**: Only returns nodes with proper protocol versions
-- ✅ **Multi-threaded Architecture**: DNS and crawler run concurrently with shared state
-- ✅ **Production Ready**: Standard DNS protocol with proper A record responses
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Rust Version](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
 
-## Usage
+*Provides reliable DNS responses with healthy Peercoin network nodes*
 
-The application supports both mainnet and testnet networks with configurable DNS hostname and nameserver bindings.
+</div>
+
+## ✨ Features
+
+- 🚀 **High Performance**: Multi-threaded DNS server and network crawler
+- 🔍 **Smart Node Discovery**: Automatically discovers and validates network nodes
+- 📊 **Persistent Statistics**: 30-day node availability tracking with SQLite
+- 🌐 **DNS Protocol Compliant**: Standard A record responses on port 53
+- 🛡️ **Quality Filtering**: Only returns nodes with proper protocol versions
+- 🐳 **Docker Ready**: Complete containerization with Docker Compose
+- 📝 **Comprehensive Logging**: Configurable verbosity levels for debugging
+
+## 🚀 Quick Start
+
+### Option 1: Docker (Recommended)
+
+```bash
+# Copy and configure environment
+cp .env.mainnet .env
+# Edit .env with your hostname and nameserver
+
+# Start the seeder
+docker-compose up
+```
+
+📖 **See [docker-usage.md](docker-usage.md) for complete Docker setup instructions**  
+🚀 **See [DEPLOYMENT.md](DEPLOYMENT.md) for production deployment guide**
+
+### Option 2: Native Build
+
+```bash
+# Build the project
+cargo build --release
+
+# Run with your configuration (requires root for port 53)
+sudo ./target/release/peercoin-seeder-rust \
+  --hostname your-seed.example.com \
+  --nameserver your-ns.example.com
+```
+
+### Validate Your Setup
+
+```bash
+# Test Docker configuration
+./test-docker.sh
+
+# Test DNS response (once running)
+dig @your-server-ip your-hostname A
+```
+
+### Test Your Seeder
+
+```bash
+dig @your-server your-seed.example.com
+```
+
+Expected response:
+```
+;; ANSWER SECTION:
+your-seed.example.com. 300 IN A 146.190.52.52
+your-seed.example.com. 300 IN A 146.59.69.245  
+your-seed.example.com. 300 IN A 76.204.61.25
+```
+
+## ⚙️ Configuration
 
 ### Command Line Options
 
-```bash
-peercoin-seeder-rust [OPTIONS]
+| Option | Description | Required |
+|--------|-------------|----------|
+| `--mainnet` | Use mainnet (default) | No |
+| `--testnet` | Use testnet | No |
+| `-h, --hostname <HOST>` | DNS hostname to serve | **Yes** |
+| `-n, --nameserver <NS>` | Nameserver hostname | **Yes** |
+| `-v, --verbose` | Enable detailed logging | No |
+| `--help` | Show help message | No |
 
-Options:
-  --testnet              Use testnet mode
-  --mainnet              Use mainnet mode (default)
-  -h, --hostname <HOST>  Hostname to bind for DNS responses
-  -n, --nameserver <NS>  Nameserver hostname
-  -v, --verbose          Enable verbose logging mode
-  --help                 Show this help message
-```
-
-
-## Quick Start
+### Examples
 
 ```bash
-# Build and run (requires root for DNS port 53)
-cargo build --release
-sudo ./target/release/peercoin-seeder-rust --hostname tseed.peercoin.net --nameserver ns.peercoin.net
+# Mainnet seeder
+./peercoin-seeder-rust --hostname seed.peercoin.net --nameserver ns.peercoin.net
 
-# Test the DNS server
-dig @127.0.0.1 tseed.peercoin.net
-```
-
-Expected DNS response:
-```
-;; ANSWER SECTION:
-tseed.peercoin.net.	300	IN	A	146.190.52.52
-tseed.peercoin.net.	300	IN	A	146.59.69.245  
-tseed.peercoin.net.	300	IN	A	76.204.61.25
+# Testnet seeder with verbose logging
+./peercoin-seeder-rust --testnet --verbose \
+  --hostname tseed.peercoin.net --nameserver tns.peercoin.net
 ```
 
 ## Project Structure
