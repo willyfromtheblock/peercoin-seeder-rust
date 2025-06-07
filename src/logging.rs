@@ -23,7 +23,7 @@ pub fn get_dns_query_count() -> u64 {
 #[macro_export]
 macro_rules! log_info {
     ($($arg:tt)*) => {
-        println!($($arg)*);
+        println!("[{}] INFO: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), format!($($arg)*));
     };
 }
 
@@ -32,7 +32,7 @@ macro_rules! log_info {
 macro_rules! log_verbose {
     ($($arg:tt)*) => {
         if $crate::logging::is_verbose() {
-            println!($($arg)*);
+            println!("[{}] VERB: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), format!($($arg)*));
         }
     };
 }
@@ -41,6 +41,6 @@ macro_rules! log_verbose {
 #[macro_export]
 macro_rules! log_error {
     ($($arg:tt)*) => {
-        eprintln!($($arg)*);
+        eprintln!("[{}] ERROR: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"), format!($($arg)*));
     };
 }
