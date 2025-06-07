@@ -78,13 +78,13 @@ RUST_LOG=info
 docker compose build
 
 # Run in foreground (with logs)
-docker compose up peercoin-seeder
+docker compose up peercoin-seeder-rust
 
 # Run in background (detached)
-docker compose up -d peercoin-seeder
+docker compose up -d peercoin-seeder-rust
 
 # View logs
-docker compose logs -f peercoin-seeder
+docker compose logs -f peercoin-seeder-rust
 
 # Stop the service
 docker compose down
@@ -93,7 +93,7 @@ docker compose down
 docker compose ps
 
 # Restart the service
-docker compose restart peercoin-seeder
+docker compose restart peercoin-seeder-rust
 
 # Remove containers and images
 docker compose down --rmi all
@@ -109,7 +109,7 @@ docker compose ps
 # Look for "healthy" status
 
 # Manual health check
-docker compose exec peercoin-seeder dig @localhost seed.peercoin.net
+docker compose exec peercoin-seeder-rust dig @localhost seed.peercoin.net
 ```
 
 ## Troubleshooting
@@ -134,7 +134,7 @@ docker-compose down
 rm -rf data/db/
 
 # Restart (will recreate database)
-docker-compose up -d peercoin-seeder
+docker-compose up -d peercoin-seeder-rust
 ```
 
 ### Logs and Debugging
@@ -144,8 +144,8 @@ Enable verbose logging:
 VERBOSE_FLAG=--verbose
 
 # Restart container
-docker-compose restart peercoin-seeder
+docker-compose restart peercoin-seeder-rust
 
 # View detailed logs
-docker-compose logs -f peercoin-seeder
+docker-compose logs -f peercoin-seeder-rust
 ```
