@@ -1193,20 +1193,15 @@ pub async fn start_crawling_with_shared_seeder(
         }
     }
 
-    // Start crawling process
-    loop {
-        let crawl_result = {
-            let mut seeder = shared_seeder.lock().await;
-            seeder.crawl_with_verbose(verbose).await
-        };
+    // Start periodic stats reporting task (runs every 60 seconds independently of crawling)
+    let stats_seeder = std::sync::Arc::clone(&shared_seeder);
+    tokio::spawn(async move {
+        loop {
+            // Sleep for 60 seconds
+            tokio::time::sleep(tokio::time::Duration::from_secs(60)).await;
 
-        if let Err(e) = crawl_result {
-            log_error!("Crawling error: {}", e);
-        }
-
-        // Check if we should report periodic statistics (every 60 seconds)
-        if crate::logging::should_report_stats() {
-            let seeder = shared_seeder.lock().await;
+            // Report periodic statistics every 60 seconds
+            let seeder = stats_seeder.lock().await;
             let (good, bad) = seeder.get_node_stats();
             let total = seeder.nodes.len();
             let dns_queries = crate::logging::get_dns_query_count();
@@ -1227,6 +1222,18 @@ pub async fn start_crawling_with_shared_seeder(
             } else {
                 seeder.print_node_summary();
             }
+        }
+    });
+
+    // Start crawling process
+    loop {
+        let crawl_result = {
+            let mut seeder = shared_seeder.lock().await;
+            seeder.crawl_with_verbose(verbose).await
+        };
+
+        if let Err(e) = crawl_result {
+            log_error!("Crawling error: {}", e);
         }
 
         // Sleep before next crawl - configurable interval (default 1 hour is sufficient for DNS seeding)
