@@ -527,13 +527,33 @@ impl Crawler {
             return Ok(());
         }
 
-        // Get a list of nodes to try connecting to - prioritize unknown nodes and good nodes
-        let nodes_to_crawl: Vec<SocketAddr> = self
+        // Get a list of nodes to try connecting to - prioritize good nodes first
+        let mut eligible_nodes: Vec<&Node> = self
             .nodes
             .values()
             .filter(|node| node.should_retry_connection())
+            .collect();
+
+        // Sort by priority: Good nodes first, then by connection attempts (fewer attempts = higher priority)
+        eligible_nodes.sort_by(|a, b| {
+            use crate::bitcoin::protocol::NodeStatusReason;
+            let a_is_good = matches!(a.get_status_reason(), NodeStatusReason::Good);
+            let b_is_good = matches!(b.get_status_reason(), NodeStatusReason::Good);
+
+            // Primary sort: Good nodes first
+            match (a_is_good, b_is_good) {
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                _ => {
+                    // Secondary sort: Fewer connection attempts first (more reliable nodes)
+                    a.connection_attempts.cmp(&b.connection_attempts)
+                }
+            }
+        });
+
+        let nodes_to_crawl: Vec<SocketAddr> = eligible_nodes
+            .into_iter()
             .map(|node| node.address)
-            .take(5) // Limit concurrent connections
             .collect();
 
         if nodes_to_crawl.is_empty() {
@@ -543,6 +563,21 @@ impl Crawler {
                 self.print_detailed_node_status();
             }
             return Ok(());
+        }
+
+        // Log which nodes are being selected with their status
+        if verbose {
+            log_verbose!("Selected nodes for crawling (prioritized):");
+            for addr in &nodes_to_crawl {
+                if let Some(node) = self.nodes.get(addr) {
+                    log_verbose!(
+                        "  {} - Status: {} (attempts: {})",
+                        addr,
+                        node.get_status_reason(),
+                        node.connection_attempts
+                    );
+                }
+            }
         }
 
         log_verbose!(

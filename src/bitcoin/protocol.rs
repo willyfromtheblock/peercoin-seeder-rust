@@ -270,11 +270,14 @@ impl Node {
             }
         }
 
-        // Always retry unknown nodes or nodes we haven't seen recently
+        // Always retry:
+        // 1. Unknown nodes or nodes marked as not recently seen
+        // 2. Currently good nodes (to maintain their good status)
+        // 3. Previously good nodes that have aged out (to re-validate them)
         matches!(
             self.status_reason,
-            NodeStatusReason::Unknown | NodeStatusReason::NotRecentlySeen
-        ) || self.is_good_node()
+            NodeStatusReason::Unknown | NodeStatusReason::NotRecentlySeen | NodeStatusReason::Good
+        )
     }
 
     /// Gets the remaining cooldown time for nodes with protocol version too old
