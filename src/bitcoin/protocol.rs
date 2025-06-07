@@ -128,7 +128,7 @@ impl std::fmt::Display for NodeStatusReason {
             NodeStatusReason::HandshakeFailed(err) => {
                 write!(f, "Protocol handshake failed: {}", err)
             }
-            NodeStatusReason::NotRecentlySeen => write!(f, "Not seen recently (>1 hour ago)"),
+            NodeStatusReason::NotRecentlySeen => write!(f, "Not seen recently (>2 hours ago)"),
             NodeStatusReason::Good => write!(f, "Meets all requirements"),
         }
     }
@@ -236,10 +236,11 @@ impl Node {
         self.update_status_reason();
     }
 
-    /// Checks if the node has been seen recently (within the last hour)
+    /// Checks if the node has been seen recently (within the last 2 hours)
+    /// This provides buffer time for the 1-hour crawling interval
     pub fn is_recently_seen(&self) -> bool {
         match self.last_seen.elapsed() {
-            Ok(elapsed) => elapsed.as_secs() < 3600, // 1 hour
+            Ok(elapsed) => elapsed.as_secs() < 7200, // 2 hours
             Err(_) => false,
         }
     }

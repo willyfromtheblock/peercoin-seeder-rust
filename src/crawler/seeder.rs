@@ -1181,6 +1181,7 @@ impl Seeder {
 pub async fn start_crawling_with_shared_seeder(
     shared_seeder: std::sync::Arc<tokio::sync::Mutex<Seeder>>,
     verbose: bool,
+    crawl_interval_seconds: u64,
 ) {
     log_info!("Starting seed crawler with shared seeder");
     log_verbose!("Verbose logging enabled");
@@ -1230,8 +1231,9 @@ pub async fn start_crawling_with_shared_seeder(
             }
         }
 
-        // Sleep for a bit before next crawl
-        tokio::time::sleep(tokio::time::Duration::from_secs(30)).await;
+        // Sleep before next crawl - configurable interval (default 1 hour is sufficient for DNS seeding)
+        // since we're not a high-frequency trading system but a DNS service
+        tokio::time::sleep(tokio::time::Duration::from_secs(crawl_interval_seconds)).await;
     }
 }
 

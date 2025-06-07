@@ -18,6 +18,7 @@ struct Config {
     nameserver: Option<String>,
     verbose: bool,
     help: bool,
+    crawl_interval_seconds: u64,
 }
 
 impl Default for Config {
@@ -28,6 +29,7 @@ impl Default for Config {
             nameserver: None, // No default nameserver - must be provided
             verbose: false,
             help: false,
+            crawl_interval_seconds: 3600, // Default to 1 hour
         }
     }
 }
@@ -66,6 +68,23 @@ fn parse_args() -> Config {
             "-v" | "--verbose" => {
                 config.verbose = true;
             }
+            "--crawl-interval" => {
+                if i + 1 < args.len() {
+                    match args[i + 1].parse::<u64>() {
+                        Ok(interval) => {
+                            config.crawl_interval_seconds = interval;
+                            i += 1;
+                        }
+                        Err(_) => {
+                            eprintln!("Error: {} requires a valid number of seconds", args[i]);
+                            config.help = true;
+                        }
+                    }
+                } else {
+                    eprintln!("Error: {} requires a value", args[i]);
+                    config.help = true;
+                }
+            }
             "--help" => {
                 config.help = true;
             }
@@ -89,6 +108,7 @@ fn print_usage(program_name: &str) {
     println!("  -h, --hostname <HOST>  Hostname to bind for DNS responses (REQUIRED)");
     println!("  -n, --nameserver <NS>  Nameserver hostname (REQUIRED)");
     println!("  -v, --verbose          Enable verbose logging");
+    println!("  --crawl-interval <SEC> Crawling interval in seconds (default: 3600 = 1 hour)");
     println!("  --help                 Show this help message");
     println!();
     println!("Examples:");
@@ -194,5 +214,10 @@ async fn main() {
 
     // Start crawling seeds with the shared seeder instance in the main thread
     let crawler_seeder = Arc::clone(&shared_seeder);
-    crawler::seeder::start_crawling_with_shared_seeder(crawler_seeder, config.verbose).await;
+    crawler::seeder::start_crawling_with_shared_seeder(
+        crawler_seeder,
+        config.verbose,
+        config.crawl_interval_seconds,
+    )
+    .await;
 }

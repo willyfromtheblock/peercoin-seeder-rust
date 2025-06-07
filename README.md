@@ -18,6 +18,7 @@
 - 📊 **Persistent Statistics**: 30-day node availability tracking with SQLite
 - 🌐 **DNS Protocol Compliant**: Standard A record responses on port 53
 - 🛡️ **Quality Filtering**: Only returns nodes with proper protocol versions
+- ⏰ **Configurable Intervals**: Adjustable crawling frequency (default: 1 hour)
 - 🐳 **Docker Ready**: Complete containerization with Docker Compose
 - 📝 **Comprehensive Logging**: Configurable verbosity levels for debugging
 
@@ -147,6 +148,11 @@ cargo run -- --mainnet -h seed.peercoin.net -n ns.peercoin.net
 Run with verbose logging for detailed debugging:
 ```bash
 cargo run -- --verbose
+```
+
+Run with custom crawling interval (30 minutes instead of default 1 hour):
+```bash
+cargo run -- --crawl-interval 1800 -h seed.peercoin.net -n ns.peercoin.net
 ```
 
 Run with default settings (mainnet, no specific hostname/nameserver):
