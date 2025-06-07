@@ -108,11 +108,11 @@ impl NodeDatabase {
             "#,
         )
         .bind(&address_str)
-        .bind(&date.to_string())
+        .bind(date.to_string())
         .bind(uptime_seconds)
         .bind(protocol_version.map(|v| v as i64))
         .bind(&user_agent)
-        .bind(&now.to_rfc3339())
+        .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
 
@@ -141,8 +141,8 @@ impl NodeDatabase {
             "#,
         )
         .bind(&address_str)
-        .bind(&date.to_string())
-        .bind(&now.to_rfc3339())
+        .bind(date.to_string())
+        .bind(now.to_rfc3339())
         .execute(&self.pool)
         .await?;
 

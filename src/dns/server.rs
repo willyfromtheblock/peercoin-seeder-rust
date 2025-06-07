@@ -10,7 +10,7 @@ use trust_dns_server::proto::rr::{Name, RData, Record, RecordType};
 use trust_dns_server::server::{RequestInfo, ServerFuture};
 use trust_dns_server::store::in_memory::InMemoryAuthority;
 
-use crate::crawler::crawler::Crawler;
+use crate::crawler::seeder::Crawler;
 use crate::{log_info, log_verbose};
 
 const DEFAULT_DNS_PORT: u16 = 53; // Standard DNS port for production

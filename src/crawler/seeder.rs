@@ -1276,7 +1276,7 @@ mod tests {
 
         // Should have at least some nodes loaded (assuming network connectivity)
         // Note: This test might fail if there's no internet connectivity
-        if seeder.nodes.len() > 0 {
+        if !seeder.nodes.is_empty() {
             log_verbose!("Test: Loaded {} seed nodes", seeder.nodes.len());
         }
     }

@@ -8,7 +8,7 @@ mod dns;
 mod logging;
 
 use bitcoin::protocol::Network;
-use crawler::crawler::Crawler;
+use crawler::seeder::Crawler;
 
 struct Config {
     network: Network,
@@ -212,7 +212,7 @@ async fn main() {
 
     // Start crawling seeds with the shared seeder instance in the main thread
     let crawler_seeder = Arc::clone(&shared_seeder);
-    crawler::crawler::start_crawling_with_shared_seeder(
+    crawler::seeder::start_crawling_with_shared_seeder(
         crawler_seeder,
         config.verbose,
         config.crawl_interval_seconds,
