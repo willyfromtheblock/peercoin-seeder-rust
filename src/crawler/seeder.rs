@@ -252,7 +252,7 @@ impl Seeder {
         let total = self.nodes.len();
 
         if total > 0 {
-            log_info!(
+            log_verbose!(
                 "Node Status: {} good, {} bad, {} total ({}% healthy)",
                 good,
                 bad,
@@ -1214,7 +1214,7 @@ pub async fn start_crawling_with_shared_seeder(
             let health_percentage = if total > 0 { good * 100 / total } else { 0 };
 
             log_info!(
-                "Periodic Stats: {} nodes ({} good, {} bad, {}% healthy), {} DNS queries served",
+                "Stats: {} nodes ({} good, {} bad, {}% healthy), {} DNS queries served",
                 total,
                 good,
                 bad,
