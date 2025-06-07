@@ -37,6 +37,7 @@ NETWORK_FLAG=--mainnet
 HOSTNAME=seed.peercoin.net
 NAMESERVER=ns.peercoin.net
 RUST_LOG=info
+#CRAWL_INTERVAL=3600
 #VERBOSE_FLAG=--verbose
 ```
 
@@ -46,6 +47,7 @@ NETWORK_FLAG=--testnet
 HOSTNAME=tseed.peercoin.net
 NAMESERVER=nst.peercoin.net
 RUST_LOG=info
+#CRAWL_INTERVAL=3600
 #VERBOSE_FLAG=--verbose
 ```
 
@@ -55,6 +57,7 @@ RUST_LOG=info
 - **HOSTNAME**: The hostname for your DNS seed (e.g., `seed.example.com`)
 - **NAMESERVER**: The authoritative nameserver (e.g., `ns.example.com`)
 - **RUST_LOG**: Logging level (`error`, `warn`, `info`, `debug`, `trace`)
+- **CRAWL_INTERVAL**: Crawling interval in seconds (default: 3600 = 1 hour)
 - **VERBOSE_FLAG**: Uncomment `#VERBOSE_FLAG=--verbose` for detailed output
 
 ## Port Configuration

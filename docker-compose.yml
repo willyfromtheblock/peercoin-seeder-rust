@@ -14,6 +14,7 @@ services:
       $${NETWORK_FLAG:---mainnet}
       --hostname $${HOSTNAME:-seed.peercoin.net}
       --nameserver $${NAMESERVER:-ns.peercoin.net}
+      $${CRAWL_INTERVAL:+--crawl-interval $${CRAWL_INTERVAL}}
       $${VERBOSE_FLAG:-}"
     volumes:
       - "./data/:/data"
