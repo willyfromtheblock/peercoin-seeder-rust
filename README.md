@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/willyfromtheblock/peercoin-seeder-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/willyfromtheblock/peercoin-seeder-rust/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Rust Version](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
+[![Rust Version](https://img.shields.io/badge/rust-1.87-orange.svg)](https://www.rust-lang.org)
 
 *Provides reliable DNS responses with healthy Peercoin network nodes*
 
