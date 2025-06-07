@@ -85,6 +85,7 @@ your-seed.example.com. 300 IN A 76.204.61.25
 | `-h, --hostname <HOST>` | DNS hostname to serve | **Yes** |
 | `-n, --nameserver <NS>` | Nameserver hostname | **Yes** |
 | `-v, --verbose` | Enable detailed logging | No |
+| `--crawl-interval <SECONDS>` | Interval for crawling seeds (default: 3600 seconds) | No |
 | `--help` | Show help message | No |
 
 ### Examples
@@ -114,7 +115,7 @@ your-seed.example.com. 300 IN A 76.204.61.25
   - `storage.rs`: Manages data storage and retrieval, interfacing with the database.
 - `src/crawler/`: Contains modules related to the seed crawler functionalities.
   - `mod.rs`: Aggregates the crawler-related submodules.
-  - `seeder.rs`: Implements the logic for crawling seeds, including fetching and processing seed data.
+  - `crawler.rs`: Implements the logic for crawling seeds, including fetching and processing seed data.
 
 ## Setup Instructions
 

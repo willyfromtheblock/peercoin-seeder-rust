@@ -1,5 +1,3 @@
-// Simple logging module for the Peercoin seeder
-
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 

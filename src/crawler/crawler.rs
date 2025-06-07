@@ -1,5 +1,3 @@
-// This file implements the logic for crawling seeds, including fetching and processing seed data.
-
 use crate::bitcoin::protocol::{message::Version, Network, Node};
 use crate::db::NodeDatabase;
 use crate::{log_error, log_info, log_verbose};
@@ -7,15 +5,15 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::str;
 
-pub struct Seeder {
+pub struct Crawler {
     nodes: HashMap<SocketAddr, Node>,
     network: Network,
     database: Option<NodeDatabase>,
 }
 
-impl Seeder {
+impl Crawler {
     pub fn new(_bind_addr: &str, network: Network) -> std::io::Result<Self> {
-        Ok(Seeder {
+        Ok(Crawler {
             nodes: HashMap::new(),
             network,
             database: None,
@@ -501,9 +499,9 @@ impl Seeder {
         let (good, bad) = self.get_node_stats();
 
         if verbose {
-            println!("=== Crawl Status ===");
-            println!("Total nodes: {}", self.nodes.len());
-            println!(
+            log_verbose!("=== Crawl Status ===");
+            log_verbose!("Total nodes: {}", self.nodes.len());
+            log_verbose!(
                 "Good nodes: {} ({}%)",
                 good,
                 if !self.nodes.is_empty() {
@@ -512,7 +510,7 @@ impl Seeder {
                     0
                 }
             );
-            println!(
+            log_verbose!(
                 "Bad nodes: {} ({}%)",
                 bad,
                 if !self.nodes.is_empty() {
@@ -1179,7 +1177,7 @@ impl Seeder {
 }
 
 pub async fn start_crawling_with_shared_seeder(
-    shared_seeder: std::sync::Arc<tokio::sync::Mutex<Seeder>>,
+    shared_seeder: std::sync::Arc<tokio::sync::Mutex<Crawler>>,
     verbose: bool,
     crawl_interval_seconds: u64,
 ) {
@@ -1243,7 +1241,7 @@ mod tests {
 
     #[test]
     fn test_cname_resolution() {
-        let seeder = Seeder::new("127.0.0.1:0", Network::Testnet).unwrap();
+        let seeder = Crawler::new("127.0.0.1:0", Network::Testnet).unwrap();
 
         // Test resolving a hostname that should work
         let result = seeder.resolve_hostname_with_cname_support("google.com");
@@ -1270,7 +1268,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_load_seed_servers() {
-        let mut seeder = Seeder::new("127.0.0.1:0", Network::Testnet).unwrap();
+        let mut seeder = Crawler::new("127.0.0.1:0", Network::Testnet).unwrap();
 
         // This should load seed servers without error
         let result = seeder.load_seed_servers().await;
@@ -1278,6 +1276,8 @@ mod tests {
 
         // Should have at least some nodes loaded (assuming network connectivity)
         // Note: This test might fail if there's no internet connectivity
-        println!("Loaded {} seed nodes", seeder.nodes.len());
+        if seeder.nodes.len() > 0 {
+            log_verbose!("Test: Loaded {} seed nodes", seeder.nodes.len());
+        }
     }
 }

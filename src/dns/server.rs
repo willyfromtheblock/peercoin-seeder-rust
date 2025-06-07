@@ -10,7 +10,7 @@ use trust_dns_server::proto::rr::{Name, RData, Record, RecordType};
 use trust_dns_server::server::{RequestInfo, ServerFuture};
 use trust_dns_server::store::in_memory::InMemoryAuthority;
 
-use crate::crawler::seeder::Seeder;
+use crate::crawler::crawler::Crawler;
 use crate::{log_info, log_verbose};
 
 const DEFAULT_DNS_PORT: u16 = 53; // Standard DNS port for production
@@ -19,14 +19,14 @@ const TTL: u32 = 300; // 5 minutes TTL for DNS records
 /// Dynamic DNS Authority that queries the seeder for fresh node data on each request
 pub struct DynamicPeercoinAuthority {
     static_authority: InMemoryAuthority,
-    shared_seeder: Arc<tokio::sync::Mutex<Seeder>>,
+    shared_seeder: Arc<tokio::sync::Mutex<Crawler>>,
     origin: Name,
 }
 
 impl DynamicPeercoinAuthority {
     pub fn new(
         static_authority: InMemoryAuthority,
-        shared_seeder: Arc<tokio::sync::Mutex<Seeder>>,
+        shared_seeder: Arc<tokio::sync::Mutex<Crawler>>,
     ) -> Self {
         let origin = static_authority.origin().clone().into();
         Self {
@@ -160,7 +160,7 @@ impl Authority for DynamicPeercoinAuthority {
 pub async fn start_dns_server_with_seeder(
     hostname: Option<String>,
     nameserver: Option<String>,
-    shared_seeder: Arc<tokio::sync::Mutex<Seeder>>,
+    shared_seeder: Arc<tokio::sync::Mutex<Crawler>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Both hostname and nameserver must be provided
     let hostname = hostname.ok_or("Hostname is required for DNS server operation")?;

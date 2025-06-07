@@ -1,5 +1,3 @@
-// This file is the entry point of the application. It initializes the DNS server and starts crawling seeds.
-
 use std::env;
 use std::sync::Arc;
 
@@ -10,7 +8,7 @@ mod dns;
 mod logging;
 
 use bitcoin::protocol::Network;
-use crawler::seeder::Seeder;
+use crawler::crawler::Crawler;
 
 struct Config {
     network: Network,
@@ -150,7 +148,7 @@ async fn main() {
     }
 
     // Create shared seeder instance
-    let mut seeder = match Seeder::new("0.0.0.0:0", config.network) {
+    let mut seeder = match Crawler::new("0.0.0.0:0", config.network) {
         Ok(s) => s,
         Err(e) => {
             crate::log_error!("Failed to initialize seeder: {}", e);
@@ -214,7 +212,7 @@ async fn main() {
 
     // Start crawling seeds with the shared seeder instance in the main thread
     let crawler_seeder = Arc::clone(&shared_seeder);
-    crawler::seeder::start_crawling_with_shared_seeder(
+    crawler::crawler::start_crawling_with_shared_seeder(
         crawler_seeder,
         config.verbose,
         config.crawl_interval_seconds,

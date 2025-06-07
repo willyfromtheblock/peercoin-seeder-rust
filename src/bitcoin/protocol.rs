@@ -84,7 +84,6 @@ impl std::fmt::Display for Network {
 
 pub mod message {
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     pub struct Version {
         pub version: u32,
         pub services: u64,
@@ -98,7 +97,6 @@ pub mod message {
     }
 
     #[derive(Debug, Clone)]
-    #[allow(dead_code)]
     pub struct NetworkAddress {
         pub services: u64,
         pub ip: [u8; 16], // IPv6 address (IPv4 mapped)
