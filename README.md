@@ -4,6 +4,7 @@
 
 **A modern, high-performance DNS seeder for the Peercoin network written in Rust**
 
+[![CI](https://github.com/willyfromtheblock/peercoin-seeder-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/willyfromtheblock/peercoin-seeder-rust/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Rust Version](https://img.shields.io/badge/rust-1.70+-orange.svg)](https://www.rust-lang.org)
 
