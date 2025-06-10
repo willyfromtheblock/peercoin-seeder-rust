@@ -1,0 +1,15 @@
+{
+  "inputs": [
+    // The "inputs" section defines the inputs required for the MCP server configuration.
+    {
+      "type": "promptString"
+    }
+  ],
+  "servers": {
+    "Context7": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
+    }
+  }
+}
