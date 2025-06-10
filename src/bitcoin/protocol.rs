@@ -223,6 +223,12 @@ impl Node {
         self.last_seen = std::time::SystemTime::now();
     }
 
+    /// Reset connection attempts (used when giving blacklisted nodes a second chance)
+    pub fn reset_connection_attempts(&mut self) {
+        self.connection_attempts = 0;
+        self.last_connection_error = None;
+    }
+
     /// Checks if the node is considered good for seeding
     pub fn is_good_node(&self) -> bool {
         matches!(self.status_reason, NodeStatusReason::Good) && self.is_recently_seen()
@@ -250,9 +256,18 @@ impl Node {
 
     /// Checks if we should retry connecting to this node
     pub fn should_retry_connection(&self) -> bool {
-        // Don't retry if we've failed too many times recently
+        // CRITICAL FIX: Add time-based recovery for blacklisted nodes
+        // Reset connection attempts after 24 hours to prevent permanent blacklisting
         if self.connection_attempts > 5 {
-            return false;
+            if let Ok(elapsed) = self.last_seen.elapsed() {
+                const TWENTY_FOUR_HOURS_IN_SECONDS: u64 = 24 * 60 * 60; // 24 hours
+                if elapsed.as_secs() > TWENTY_FOUR_HOURS_IN_SECONDS {
+                    // Node has been blacklisted for over 24 hours, allow retry
+                    // Note: We can't mutate self here, but the next connection attempt will reset the counter
+                    return true;
+                }
+            }
+            return false; // Still within 24-hour blacklist period
         }
 
         // Check if this node has protocol version too old and if it's within the 12-hour cooldown period

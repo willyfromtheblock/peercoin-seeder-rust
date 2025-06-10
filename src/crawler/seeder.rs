@@ -40,6 +40,58 @@ impl Crawler {
         &self.database
     }
 
+    /// Load existing nodes from database into memory on startup
+    /// This is the critical missing piece that causes the memory-database disconnect
+    pub async fn load_nodes_from_database(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref db) = self.database {
+            log_info!("Loading existing nodes from database into memory...");
+            let min_protocol_version = self.network.min_protocol_version();
+
+            match db.get_all_known_nodes(min_protocol_version).await {
+                Ok(nodes_data) => {
+                    let mut loaded_count = 0;
+
+                    for node_data in nodes_data {
+                        // Create a new Node instance with database information
+                        let mut node = Node::new(node_data.address, self.network);
+
+                        // Set protocol version and user agent if available
+                        if let Some(version) = node_data.last_protocol_version {
+                            node.protocol_version = Some(version);
+                        }
+
+                        // Mark the node as recently seen to avoid immediate re-checking
+                        node.update_last_seen();
+
+                        // Insert into the HashMap
+                        self.nodes.insert(node_data.address, node);
+                        loaded_count += 1;
+
+                        log_verbose!(
+                            "Loaded node {} (availability: {:.1}%, {} checks)",
+                            node_data.address,
+                            node_data.availability_score * 100.0,
+                            node_data.total_checks
+                        );
+                    }
+
+                    log_info!(
+                        "Successfully loaded {} nodes from database into memory",
+                        loaded_count
+                    );
+                }
+                Err(e) => {
+                    log_error!("Failed to load nodes from database: {}", e);
+                    return Err(e);
+                }
+            }
+        } else {
+            log_verbose!("No database available, skipping node loading");
+        }
+
+        Ok(())
+    }
+
     /// Add a new node or update an existing one
     pub async fn add_or_update_node(&mut self, address: SocketAddr, version_msg: Option<&Version>) {
         if let Some(version) = version_msg {
@@ -587,6 +639,16 @@ impl Crawler {
 
         for addr in nodes_to_crawl {
             log_verbose!("Connecting to node: {}", addr);
+
+            // CRITICAL FIX: Reset connection attempts for blacklisted nodes getting a second chance
+            if let Some(node) = self.nodes.get_mut(&addr) {
+                if node.connection_attempts > 5 {
+                    // This node was blacklisted but is now eligible for retry (24h+ passed)
+                    log_verbose!("  → Resetting connection attempts for blacklisted node {} (was {} attempts)", addr, node.connection_attempts);
+                    node.reset_connection_attempts();
+                }
+            }
+
             match self.connect_and_discover_peers_async(addr).await {
                 Ok(new_peers) => {
                     if new_peers > 0 {
@@ -1219,9 +1281,17 @@ pub async fn start_crawling_with_shared_seeder(
     log_info!("Starting seed crawler with shared seeder");
     log_verbose!("Verbose logging enabled");
 
-    // Load seed servers for the network
+    // CRITICAL FIX: Load existing nodes from database first, then add seed servers
     {
         let mut seeder = shared_seeder.lock().await;
+
+        // Load existing nodes from database into memory (fixes memory-database disconnect)
+        if let Err(e) = seeder.load_nodes_from_database().await {
+            log_error!("Failed to load nodes from database: {}", e);
+            // Continue anyway, but this is a significant issue
+        }
+
+        // Then load seed servers (these will be added to any existing database nodes)
         if let Err(e) = seeder.load_seed_servers().await {
             log_error!("Failed to load seed servers: {}", e);
             return;

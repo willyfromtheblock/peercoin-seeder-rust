@@ -221,6 +221,32 @@ impl NodeDatabase {
         Ok(metrics)
     }
 
+    /// Get all nodes from database with relaxed criteria for startup loading
+    /// This is used to populate the in-memory HashMap with existing database nodes
+    pub async fn get_all_known_nodes(
+        &self,
+        min_protocol_version: u32,
+    ) -> Result<Vec<NodeAvailabilityMetrics>, Box<dyn std::error::Error>> {
+        let metrics = self.get_availability_metrics().await?;
+
+        let known_nodes: Vec<_> = metrics
+            .into_iter()
+            .filter(|m| {
+                // Much more relaxed criteria for loading existing nodes into memory
+                m.last_protocol_version.unwrap_or(0) >= min_protocol_version &&
+                m.successful_checks >= 1 && // At least 1 successful check
+                // Seen within last 7 days (more generous than the 24h for DNS serving)
+                (Utc::now() - m.last_seen).num_days() < 7
+            })
+            .collect();
+
+        log_info!(
+            "Retrieved {} known nodes from database for memory loading",
+            known_nodes.len()
+        );
+        Ok(known_nodes)
+    }
+
     /// Get the top N most reliable nodes based on 30-day availability
     pub async fn get_top_reliable_nodes(
         &self,
