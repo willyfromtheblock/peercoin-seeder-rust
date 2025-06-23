@@ -179,6 +179,8 @@ impl Crawler {
             }
         } else {
             // Handle nodes without version information
+            let node_was_new = !self.nodes.contains_key(&address);
+
             let node_status = {
                 let node = self.nodes.entry(address).or_insert_with(|| {
                     log_verbose!("Adding new node: {}", address);
@@ -196,8 +198,21 @@ impl Crawler {
                     }
                     crate::bitcoin::protocol::NodeStatusReason::Unknown => {
                         log_verbose!("  Status: ? UNKNOWN");
-                        // For unknown status, we don't record as successful or failed
-                        return;
+                        // For unknown status nodes, we still want to persist them to database
+                        // but not as a successful/failed health check - just as a discovery
+                        if node_was_new {
+                            // Record newly discovered nodes to database as a basic entry
+                            if let Some(ref db) = self.database {
+                                if let Err(e) = db.record_failed_check(address).await {
+                                    log_error!(
+                                        "Failed to record new node discovery for {}: {}",
+                                        address,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                        return; // Don't proceed to health check recording
                     }
                     reason => {
                         log_verbose!("  Status: ✗ BAD - {}", reason);
