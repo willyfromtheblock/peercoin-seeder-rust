@@ -4,7 +4,8 @@ use peercoin_seeder_rust::db::storage::NodeDatabase;
 async fn test_database_direct_operations() {
     println!("\n=== Testing Direct Database Operations ===");
     
-    let database_path = "db/nodes_testnet.db";
+    // Use in-memory database for CI compatibility
+    let database_path = ":memory:";
     let db = NodeDatabase::new(database_path).await.unwrap();
     
     // First, check what's currently in the database
@@ -52,7 +53,8 @@ async fn test_database_direct_operations() {
 async fn test_database_time_window() {
     println!("\n=== Testing Database Time Window Logic ===");
     
-    let database_path = "db/nodes_testnet.db";
+    // Use in-memory database for CI compatibility
+    let database_path = ":memory:";
     let db = NodeDatabase::new(database_path).await.unwrap();
     
     // Record a test entry and immediately check if it appears
