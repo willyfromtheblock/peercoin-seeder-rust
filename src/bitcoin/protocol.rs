@@ -68,7 +68,7 @@ impl std::str::FromStr for Network {
         match s.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
             "testnet" => Ok(Network::Testnet),
-            _ => Err(format!("Unknown network: {}", s)),
+            _ => Err(format!("Unknown network: {s}")),
         }
     }
 }
@@ -120,11 +120,11 @@ impl std::fmt::Display for NodeStatusReason {
         match self {
             NodeStatusReason::Unknown => write!(f, "No version information received yet"),
             NodeStatusReason::ProtocolVersionTooOld(actual, required) => {
-                write!(f, "Protocol version {} < required {}", actual, required)
+                write!(f, "Protocol version {actual} < required {required}")
             }
-            NodeStatusReason::ConnectionFailed(err) => write!(f, "Connection failed: {}", err),
+            NodeStatusReason::ConnectionFailed(err) => write!(f, "Connection failed: {err}"),
             NodeStatusReason::HandshakeFailed(err) => {
-                write!(f, "Protocol handshake failed: {}", err)
+                write!(f, "Protocol handshake failed: {err}")
             }
             NodeStatusReason::NotRecentlySeen => write!(f, "Not seen recently (>2 hours ago)"),
             NodeStatusReason::Good => write!(f, "Meets all requirements"),

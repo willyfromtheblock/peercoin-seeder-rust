@@ -10,7 +10,7 @@ async fn test_database_connection() {
 
     // Try to initialize the database
     let database_path = "db/nodes_testnet.db";
-    println!("Attempting to initialize database at: {}", database_path);
+    println!("Attempting to initialize database at: {database_path}");
 
     match seeder.init_database(database_path).await {
         Ok(()) => {
@@ -30,7 +30,7 @@ async fn test_database_connection() {
                             );
                         }
                         Err(e) => {
-                            println!("❌ Database query failed: {}", e);
+                            println!("❌ Database query failed: {e}");
                         }
                     }
                 }
@@ -39,7 +39,7 @@ async fn test_database_connection() {
             }
         }
         Err(e) => {
-            println!("❌ Database initialization failed: {}", e);
+            println!("❌ Database initialization failed: {e}");
             println!("   This explains why database persistence isn't working!");
         }
     }
@@ -53,7 +53,7 @@ async fn test_database_file_permissions() {
 
     // Check if file exists
     if std::path::Path::new(database_path).exists() {
-        println!("✅ Database file exists: {}", database_path);
+        println!("✅ Database file exists: {database_path}");
 
         // Check file permissions
         match std::fs::metadata(database_path) {
@@ -68,15 +68,15 @@ async fn test_database_file_permissions() {
                 use peercoin_seeder_rust::db::storage::NodeDatabase;
                 match NodeDatabase::new(database_path).await {
                     Ok(_) => println!("✅ Direct database connection successful"),
-                    Err(e) => println!("❌ Direct database connection failed: {}", e),
+                    Err(e) => println!("❌ Direct database connection failed: {e}"),
                 }
             }
             Err(e) => {
-                println!("❌ Cannot read file metadata: {}", e);
+                println!("❌ Cannot read file metadata: {e}");
             }
         }
     } else {
-        println!("❌ Database file does not exist: {}", database_path);
+        println!("❌ Database file does not exist: {database_path}");
 
         // Check if directory exists
         if let Some(parent) = std::path::Path::new(database_path).parent() {

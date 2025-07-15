@@ -185,7 +185,7 @@ impl NodeDatabase {
             let address_str: String = row.get("address");
             let address: SocketAddr = address_str
                 .parse()
-                .map_err(|e| format!("Invalid address in DB: {}", e))?;
+                .map_err(|e| format!("Invalid address in DB: {e}"))?;
 
             let days_seen: i32 = row.get("days_seen");
             let total_successful: i32 = row.get("total_successful");

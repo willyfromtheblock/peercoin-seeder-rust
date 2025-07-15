@@ -24,14 +24,14 @@ async fn test_database_direct_operations() {
 
     // Add a test node directly to database
     let test_address = "9.8.7.6:9903".parse().unwrap();
-    println!("\n🔄 Recording successful check for: {}", test_address);
+    println!("\n🔄 Recording successful check for: {test_address}");
 
     match db
         .record_successful_check(test_address, Some(70018), Some("Test".to_string()), 30)
         .await
     {
         Ok(()) => println!("✅ Direct record successful"),
-        Err(e) => println!("❌ Direct record failed: {}", e),
+        Err(e) => println!("❌ Direct record failed: {e}"),
     }
 
     // Check database again
@@ -76,7 +76,7 @@ async fn test_database_time_window() {
     // Record a test entry and immediately check if it appears
     let test_address = "5.4.3.2:9903".parse().unwrap();
 
-    println!("🔄 Recording test entry for: {}", test_address);
+    println!("🔄 Recording test entry for: {test_address}");
     db.record_successful_check(test_address, Some(70018), Some("TimeTest".to_string()), 30)
         .await
         .unwrap();

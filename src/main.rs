@@ -98,7 +98,7 @@ fn parse_args() -> Config {
 }
 
 fn print_usage(program_name: &str) {
-    println!("Usage: {} [OPTIONS]", program_name);
+    println!("Usage: {program_name} [OPTIONS]");
     println!();
     println!("Options:");
     println!("  --testnet              Use testnet mode");
@@ -111,12 +111,10 @@ fn print_usage(program_name: &str) {
     println!();
     println!("Examples:");
     println!(
-        "  {} --testnet -h tseed.peercoin.net -n nst.peercoin.net",
-        program_name
+        "  {program_name} --testnet -h tseed.peercoin.net -n nst.peercoin.net"
     );
     println!(
-        "  {} --mainnet -h seed.peercoin.net -n ns.peercoin.net",
-        program_name
+        "  {program_name} --mainnet -h seed.peercoin.net -n ns.peercoin.net"
     );
     println!();
     println!("Note: Both hostname and nameserver must be provided for DNS server operation.");

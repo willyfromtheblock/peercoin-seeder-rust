@@ -181,11 +181,11 @@ pub async fn start_dns_server_with_seeder(
 
     // Get the hostname as a domain name for the authority
     let origin =
-        Name::from_ascii(&hostname).map_err(|_| format!("Invalid hostname: {}", hostname))?;
+        Name::from_ascii(&hostname).map_err(|_| format!("Invalid hostname: {hostname}"))?;
 
     // Get the nameserver as a domain name
     let nameserver_name =
-        Name::from_ascii(&nameserver).map_err(|_| format!("Invalid nameserver: {}", nameserver))?;
+        Name::from_ascii(&nameserver).map_err(|_| format!("Invalid nameserver: {nameserver}"))?;
 
     // Create dynamic DNS authority that will periodically update with peer data
     let static_authority = create_static_authority(origin.clone(), nameserver_name).await?;

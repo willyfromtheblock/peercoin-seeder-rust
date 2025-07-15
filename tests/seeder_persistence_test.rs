@@ -16,7 +16,7 @@ async fn test_seeder_database_persistence() {
             println!("✅ Database initialized successfully");
         }
         Err(e) => {
-            println!("❌ Database initialization failed: {}", e);
+            println!("❌ Database initialization failed: {e}");
             return; // Exit test if database fails
         }
     }
@@ -40,7 +40,7 @@ async fn test_seeder_database_persistence() {
     // Test adding a node like the crawler does
     let test_address: SocketAddr = "1.2.3.4:9903".parse().unwrap();
     
-    println!("🔄 Adding test node: {}", test_address);
+    println!("🔄 Adding test node: {test_address}");
     // Instead of creating a version message, let's test add_or_update_node with None version
     // This simulates discovering a peer without full handshake
     println!("🔍 Before add_or_update_node call");
@@ -101,7 +101,7 @@ async fn test_seeder_database_persistence() {
                     println!("📊 Final node count: {}", final_metrics.len());
                 }
                 Err(e) => {
-                    println!("❌ Direct database record failed: {}", e);
+                    println!("❌ Direct database record failed: {e}");
                 }
             }
         }

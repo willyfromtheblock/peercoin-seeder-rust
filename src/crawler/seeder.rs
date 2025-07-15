@@ -555,7 +555,7 @@ impl Crawler {
 
         // Use the standard library's resolution which handles CNAME chains automatically
         // but with better error handling and logging
-        let addr_with_dummy_port = format!("{}:0", hostname);
+        let addr_with_dummy_port = format!("{hostname}:0");
         match addr_with_dummy_port.to_socket_addrs() {
             Ok(socket_addrs) => {
                 let ip_addrs: Vec<IpAddr> =
@@ -844,7 +844,7 @@ impl Crawler {
         timeout(Duration::from_secs(5), stream.write_all(&full_message))
             .await
             .map_err(|_| "Timeout sending version message".to_string())?
-            .map_err(|e| format!("Failed to send version message: {}", e))?;
+            .map_err(|e| format!("Failed to send version message: {e}"))?;
 
         log_verbose!("  → Version message sent, waiting for response...");
 
@@ -875,7 +875,7 @@ impl Crawler {
         timeout(Duration::from_secs(5), stream.write_all(&verack_message))
             .await
             .map_err(|_| "Timeout sending verack".to_string())?
-            .map_err(|e| format!("Failed to send verack: {}", e))?;
+            .map_err(|e| format!("Failed to send verack: {e}"))?;
 
         log_verbose!("  → Verack sent, requesting addresses...");
 
@@ -904,15 +904,14 @@ impl Crawler {
         timeout(Duration::from_secs(10), stream.read_exact(&mut header))
             .await
             .map_err(|_| "Timeout reading version response header".to_string())?
-            .map_err(|e| format!("Failed to read version header: {}", e))?;
+            .map_err(|e| format!("Failed to read version header: {e}"))?;
 
         // Validate magic bytes
         let magic_bytes = self.network.magic_bytes();
         let peer_magic = [header[0], header[1], header[2], header[3]];
         if peer_magic != magic_bytes {
             return Err(format!(
-                "Invalid magic bytes! Expected {:02x?}, got {:02x?}",
-                magic_bytes, peer_magic
+                "Invalid magic bytes! Expected {magic_bytes:02x?}, got {peer_magic:02x?}"
             ));
         }
 
@@ -921,8 +920,7 @@ impl Crawler {
         let command_str = command.trim_end_matches('\0');
         if command_str != "version" {
             return Err(format!(
-                "Expected 'version' response, got '{}'",
-                command_str
+                "Expected 'version' response, got '{command_str}'"
             ));
         }
 
@@ -939,7 +937,7 @@ impl Crawler {
         timeout(Duration::from_secs(10), stream.read_exact(&mut payload))
             .await
             .map_err(|_| "Timeout reading version payload".to_string())?
-            .map_err(|e| format!("Failed to read version payload: {}", e))?;
+            .map_err(|e| format!("Failed to read version payload: {e}"))?;
 
         // Parse version message
         self.parse_version_message(&payload)
@@ -975,7 +973,7 @@ impl Crawler {
         timeout(Duration::from_secs(5), stream.write_all(&getaddr_message))
             .await
             .map_err(|_| "Timeout sending getaddr".to_string())?
-            .map_err(|e| format!("Failed to send getaddr: {}", e))?;
+            .map_err(|e| format!("Failed to send getaddr: {e}"))?;
 
         log_verbose!("  → Getaddr sent, waiting for addr messages...");
 
@@ -1009,7 +1007,7 @@ impl Crawler {
                                 stream
                                     .read_exact(&mut payload)
                                     .await
-                                    .map_err(|e| format!("Failed to read addr payload: {}", e))?;
+                                    .map_err(|e| format!("Failed to read addr payload: {e}"))?;
 
                                 let addrs = self.parse_addr_message(&payload)?;
                                 peer_addrs.extend(addrs);
@@ -1027,7 +1025,7 @@ impl Crawler {
                                 stream
                                     .read_exact(&mut ping_payload)
                                     .await
-                                    .map_err(|e| format!("Failed to read ping payload: {}", e))?;
+                                    .map_err(|e| format!("Failed to read ping payload: {e}"))?;
 
                                 // Send pong response
                                 let mut pong_message = Vec::new();
@@ -1056,7 +1054,7 @@ impl Crawler {
                             if payload_length > 0 {
                                 let mut skip_buf = vec![0u8; payload_length];
                                 stream.read_exact(&mut skip_buf).await.map_err(|e| {
-                                    format!("Failed to skip {} payload: {}", command_str, e)
+                                    format!("Failed to skip {command_str} payload: {e}")
                                 })?;
                             }
                             log_verbose!(
