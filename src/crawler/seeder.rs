@@ -92,6 +92,56 @@ impl Crawler {
         Ok(())
     }
 
+    /// Periodically reload nodes from database that may have been lost
+    /// This ensures we don't permanently lose track of good nodes
+    pub async fn reload_lost_nodes(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if let Some(ref db) = self.database {
+            log_verbose!("Checking database for lost nodes to reload...");
+            
+            // Get all nodes with good history that aren't in memory
+            let min_protocol_version = self.network.min_protocol_version();
+            let db_nodes = db.get_all_known_nodes(min_protocol_version).await?;
+            let total_db_nodes = db_nodes.len();
+            
+            let mut reloaded_count = 0;
+            for node_data in db_nodes {
+                // Only reload if not already in memory
+                if !self.nodes.contains_key(&node_data.address) {
+                    // Only reload nodes with good history
+                    if node_data.availability_score > 0.8 || 
+                       (node_data.days_seen >= 5 && node_data.successful_checks >= 20) {
+                        
+                        let mut node = Node::new(node_data.address, self.network);
+                        
+                        // Set protocol version if available
+                        if let Some(version) = node_data.last_protocol_version {
+                            node.protocol_version = Some(version);
+                        }
+                        
+                        // Don't mark as recently seen - let the crawler verify it's still alive
+                        self.nodes.insert(node_data.address, node);
+                        reloaded_count += 1;
+                        
+                        log_verbose!(
+                            "Reloaded lost node {} ({}% uptime over {} days)",
+                            node_data.address,
+                            (node_data.availability_score * 100.0) as u32,
+                            node_data.days_seen
+                        );
+                    }
+                }
+            }
+            
+            if reloaded_count > 0 {
+                log_info!("Reloaded {} lost nodes from database", reloaded_count);
+            } else {
+                log_verbose!("No lost nodes needed reloading (checked {} database nodes)", total_db_nodes);
+            }
+        }
+        
+        Ok(())
+    }
+
     /// Add a new node or update an existing one
     pub async fn add_or_update_node(&mut self, address: SocketAddr, version_msg: Option<&Version>) {
         if let Some(version) = version_msg {
@@ -1346,7 +1396,22 @@ pub async fn start_crawling_with_shared_seeder(
     });
 
     // Start crawling process
+    let mut crawl_count = 0;
     loop {
+        crawl_count += 1;
+        
+        // Every 10 crawls (approximately every 10 hours), reload lost nodes from database
+        if crawl_count % 10 == 0 {
+            let reload_result = {
+                let mut seeder = shared_seeder.lock().await;
+                seeder.reload_lost_nodes().await
+            };
+            
+            if let Err(e) = reload_result {
+                log_error!("Failed to reload lost nodes: {}", e);
+            }
+        }
+        
         let crawl_result = {
             let mut seeder = shared_seeder.lock().await;
             seeder.crawl_with_verbose(verbose).await

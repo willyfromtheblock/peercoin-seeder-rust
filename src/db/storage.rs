@@ -232,11 +232,16 @@ impl NodeDatabase {
         let known_nodes: Vec<_> = metrics
             .into_iter()
             .filter(|m| {
-                // Much more relaxed criteria for loading existing nodes into memory
+                // Load nodes based on historical reliability, not just recency
                 m.last_protocol_version.unwrap_or(0) >= min_protocol_version &&
-                m.successful_checks >= 1 && // At least 1 successful check
-                // Seen within last 7 days (more generous than the 24h for DNS serving)
-                (Utc::now() - m.last_seen).num_days() < 7
+                (
+                    // Either: seen recently (within 30 days)
+                    (Utc::now() - m.last_seen).num_days() < 30 ||
+                    // Or: has excellent historical uptime (>90%) with significant history
+                    (m.availability_score > 0.9 && m.total_checks >= 100) ||
+                    // Or: was seen consistently for many days before disappearing
+                    (m.days_seen >= 7 && m.successful_checks >= 50)
+                )
             })
             .collect();
 
