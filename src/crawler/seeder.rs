@@ -252,15 +252,14 @@ impl Crawler {
                         // but not as a successful/failed health check - just as a discovery
                         if node_was_new {
                             // Record newly discovered nodes to database as a basic entry
-                            if let Some(ref db) = self.database {
-                                if let Err(e) = db.record_failed_check(address).await {
+                            if let Some(ref db) = self.database
+                                && let Err(e) = db.record_failed_check(address).await {
                                     log_error!(
                                         "Failed to record new node discovery for {}: {}",
                                         address,
                                         e
                                     );
                                 }
-                            }
                         }
                         return; // Don't proceed to health check recording
                     }
@@ -706,13 +705,12 @@ impl Crawler {
             log_verbose!("Connecting to node: {}", addr);
 
             // CRITICAL FIX: Reset connection attempts for blacklisted nodes getting a second chance
-            if let Some(node) = self.nodes.get_mut(&addr) {
-                if node.connection_attempts > 5 {
+            if let Some(node) = self.nodes.get_mut(&addr)
+                && node.connection_attempts > 5 {
                     // This node was blacklisted but is now eligible for retry (24h+ passed)
                     log_verbose!("  → Resetting connection attempts for blacklisted node {} (was {} attempts)", addr, node.connection_attempts);
                     node.reset_connection_attempts();
                 }
-            }
 
             match self.connect_and_discover_peers_async(addr).await {
                 Ok(new_peers) => {
@@ -1376,7 +1374,7 @@ pub async fn start_crawling_with_shared_seeder(
             let (good, bad) = seeder.get_node_stats();
             let total = seeder.nodes.len();
             let dns_queries = crate::logging::get_dns_query_count();
-            let health_percentage = if total > 0 { good * 100 / total } else { 0 };
+            let health_percentage = (good * 100).checked_div(total).unwrap_or(0);
 
             log_info!(
                 "Stats: {} nodes ({} good, {} bad, {}% healthy), {} DNS queries served",

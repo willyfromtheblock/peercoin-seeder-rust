@@ -274,16 +274,14 @@ impl Node {
         if matches!(
             self.status_reason,
             NodeStatusReason::ProtocolVersionTooOld(_, _)
-        ) {
-            if let Some(too_old_since) = self.protocol_version_too_old_since {
-                if let Ok(elapsed) = too_old_since.elapsed() {
+        )
+            && let Some(too_old_since) = self.protocol_version_too_old_since
+                && let Ok(elapsed) = too_old_since.elapsed() {
                     const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
                     if elapsed.as_secs() < TWELVE_HOURS_IN_SECONDS {
                         return false; // Don't retry within 12 hours of being marked as protocol too old
                     }
                 }
-            }
-        }
 
         // Always retry:
         // 1. Unknown nodes or nodes marked as not recently seen
@@ -301,17 +299,15 @@ impl Node {
         if matches!(
             self.status_reason,
             NodeStatusReason::ProtocolVersionTooOld(_, _)
-        ) {
-            if let Some(too_old_since) = self.protocol_version_too_old_since {
-                if let Ok(elapsed) = too_old_since.elapsed() {
+        )
+            && let Some(too_old_since) = self.protocol_version_too_old_since
+                && let Ok(elapsed) = too_old_since.elapsed() {
                     const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
                     let elapsed_secs = elapsed.as_secs();
                     if elapsed_secs < TWELVE_HOURS_IN_SECONDS {
                         return Some(TWELVE_HOURS_IN_SECONDS - elapsed_secs);
                     }
                 }
-            }
-        }
         None
     }
 }

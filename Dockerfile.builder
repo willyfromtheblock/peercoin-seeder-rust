@@ -1,5 +1,5 @@
 # Multi-stage Docker build for cross-compilation
-FROM rust:1.87-bullseye AS builder
+FROM rust:1-bookworm AS builder
 
 # Install dependencies for SQLite
 RUN apt-get update && apt-get install -y \
@@ -18,12 +18,12 @@ COPY . .
 RUN cargo build --release
 
 # Runtime stage - minimal image
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl1.1 \
+    libssl3 \
     dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
