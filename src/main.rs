@@ -110,12 +110,8 @@ fn print_usage(program_name: &str) {
     println!("  --help                 Show this help message");
     println!();
     println!("Examples:");
-    println!(
-        "  {program_name} --testnet -h tseed.peercoin.net -n nst.peercoin.net"
-    );
-    println!(
-        "  {program_name} --mainnet -h seed.peercoin.net -n ns.peercoin.net"
-    );
+    println!("  {program_name} --testnet -h tseed.peercoin.net -n nst.peercoin.net");
+    println!("  {program_name} --mainnet -h seed.peercoin.net -n ns.peercoin.net");
     println!();
     println!("Note: Both hostname and nameserver must be provided for DNS server operation.");
 }

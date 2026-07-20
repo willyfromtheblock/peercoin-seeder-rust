@@ -40,8 +40,9 @@ impl DynamicPeercoinAuthority {
     async fn get_fresh_a_records(&self) -> Vec<Record> {
         let top_nodes = {
             let seeder = self.shared_seeder.lock().await;
-            // Use historical reliable nodes if available, otherwise fall back to current good nodes
-            seeder.get_top_reliable_nodes(10).await
+            // Served from the in-memory cache refreshed once per crawl, so a DNS
+            // query never runs a DB aggregation while holding the seeder lock.
+            seeder.get_cached_reliable_nodes(10)
         };
 
         let mut records = Vec::new();
