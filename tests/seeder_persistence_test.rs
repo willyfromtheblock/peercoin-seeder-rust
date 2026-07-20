@@ -46,7 +46,8 @@ async fn test_seeder_database_persistence() {
     println!("🔍 Before add_or_update_node call");
     
     // Enable verbose logging for this test
-    std::env::set_var("RUST_LOG", "trace");
+    // ponytail: edition 2024 makes set_var unsafe; single-threaded test start, no races.
+    unsafe { std::env::set_var("RUST_LOG", "trace") };
     
     seeder.add_or_update_node(test_address, None).await;
     println!("🔍 After add_or_update_node call");

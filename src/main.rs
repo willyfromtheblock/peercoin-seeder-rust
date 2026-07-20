@@ -178,7 +178,7 @@ async fn main() {
             tokio::time::sleep(tokio::time::Duration::from_secs(24 * 60 * 60)).await;
 
             let seeder = cleanup_seeder.lock().await;
-            if let Some(ref db) = seeder.get_database() {
+            if let Some(db) = seeder.get_database() {
                 match db.cleanup_old_data().await {
                     Ok(deleted_count) => {
                         crate::log_info!(

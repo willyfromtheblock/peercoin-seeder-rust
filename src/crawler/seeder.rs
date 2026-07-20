@@ -1004,9 +1004,9 @@ impl Crawler {
                         "addr" => {
                             if payload_length > 0 {
                                 let mut payload = vec![0u8; payload_length];
-                                stream
-                                    .read_exact(&mut payload)
+                                timeout(Duration::from_secs(2), stream.read_exact(&mut payload))
                                     .await
+                                    .map_err(|_| "Timeout reading addr payload".to_string())?
                                     .map_err(|e| format!("Failed to read addr payload: {e}"))?;
 
                                 let addrs = self.parse_addr_message(&payload)?;
@@ -1022,9 +1022,9 @@ impl Crawler {
                             // Handle ping by sending pong
                             if payload_length > 0 {
                                 let mut ping_payload = vec![0u8; payload_length];
-                                stream
-                                    .read_exact(&mut ping_payload)
+                                timeout(Duration::from_secs(2), stream.read_exact(&mut ping_payload))
                                     .await
+                                    .map_err(|_| "Timeout reading ping payload".to_string())?
                                     .map_err(|e| format!("Failed to read ping payload: {e}"))?;
 
                                 // Send pong response
@@ -1053,9 +1053,12 @@ impl Crawler {
                             // Skip other messages
                             if payload_length > 0 {
                                 let mut skip_buf = vec![0u8; payload_length];
-                                stream.read_exact(&mut skip_buf).await.map_err(|e| {
-                                    format!("Failed to skip {command_str} payload: {e}")
-                                })?;
+                                timeout(Duration::from_secs(2), stream.read_exact(&mut skip_buf))
+                                    .await
+                                    .map_err(|_| format!("Timeout skipping {command_str} payload"))?
+                                    .map_err(|e| {
+                                        format!("Failed to skip {command_str} payload: {e}")
+                                    })?;
                             }
                             log_verbose!(
                                 "  → Received '{}' message, continuing to wait for addr...",
@@ -1428,6 +1431,49 @@ pub async fn start_crawling_with_shared_seeder(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A peer that completes enough to reach the addr loop, announces an addr
+    /// payload, then stalls without sending it. Before the timeout fix this
+    /// hung request_peer_addresses forever (holding the global seeder mutex,
+    /// freezing stats + DNS). After the fix it must return within ~2s.
+    #[tokio::test]
+    async fn test_stalled_addr_payload_does_not_hang() {
+        use tokio::io::AsyncWriteExt;
+        use tokio::net::{TcpListener, TcpStream};
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Malicious/broken peer: send a valid "addr" header claiming a 34-byte
+        // payload, then send nothing and keep the connection open.
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut header = Vec::new();
+            header.extend_from_slice(&[0u8; 4]); // magic (not validated here)
+            header.extend_from_slice(b"addr\0\0\0\0\0\0\0\0"); // command
+            header.extend_from_slice(&34u32.to_le_bytes()); // payload_length
+            header.extend_from_slice(&[0u8; 4]); // checksum
+            sock.write_all(&header).await.unwrap();
+            // Withhold the payload; hold the connection open long past the
+            // client's read timeout so a bare read_exact would block forever.
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+
+        let seeder = Crawler::new("127.0.0.1:0", Network::Testnet).unwrap();
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            seeder.request_peer_addresses(&mut stream),
+        )
+        .await;
+
+        server.abort();
+        assert!(
+            result.is_ok(),
+            "request_peer_addresses hung on a stalled addr payload"
+        );
+    }
 
     #[test]
     fn test_cname_resolution() {
