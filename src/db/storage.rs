@@ -1,6 +1,6 @@
 use crate::{log_info, log_verbose};
 use chrono::{DateTime, Utc};
-use sqlx::{migrate::MigrateDatabase, Pool, Row, Sqlite, SqlitePool};
+use sqlx::{Pool, Row, Sqlite, SqlitePool, migrate::MigrateDatabase};
 use std::net::SocketAddr;
 
 /// Persistent storage for node statistics and health tracking
@@ -233,15 +233,15 @@ impl NodeDatabase {
             .into_iter()
             .filter(|m| {
                 // Load nodes based on historical reliability, not just recency
-                m.last_protocol_version.unwrap_or(0) >= min_protocol_version &&
-                (
-                    // Either: seen recently (within 30 days)
-                    (Utc::now() - m.last_seen).num_days() < 30 ||
+                m.last_protocol_version.unwrap_or(0) >= min_protocol_version
+                    && (
+                        // Either: seen recently (within 30 days)
+                        (Utc::now() - m.last_seen).num_days() < 30 ||
                     // Or: has excellent historical uptime (>90%) with significant history
                     (m.availability_score > 0.9 && m.total_checks >= 100) ||
                     // Or: was seen consistently for many days before disappearing
                     (m.days_seen >= 7 && m.successful_checks >= 50)
-                )
+                    )
             })
             .collect();
 

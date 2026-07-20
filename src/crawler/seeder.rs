@@ -1,4 +1,4 @@
-use crate::bitcoin::protocol::{message::Version, Network, Node};
+use crate::bitcoin::protocol::{Network, Node, message::Version};
 use crate::db::NodeDatabase;
 use crate::{log_error, log_info, log_verbose};
 use std::collections::HashMap;
@@ -9,6 +9,46 @@ pub struct Crawler {
     nodes: HashMap<SocketAddr, Node>,
     network: Network,
     database: Option<NodeDatabase>,
+    /// Cached reliable-node list served to DNS, refreshed once per crawl so DNS
+    /// queries never trigger a DB aggregation while holding the seeder lock.
+    reliable_cache: Vec<SocketAddr>,
+}
+
+/// Stateless network prober. Holds only the network (Copy) so it can be moved
+/// into concurrent probe tasks without borrowing the shared Crawler / its lock.
+#[derive(Clone, Copy)]
+struct Prober {
+    network: Network,
+}
+
+/// Why a probe failed, so the result can be recorded with the right status.
+enum ProbeError {
+    Connect(String),
+    Handshake(String),
+}
+
+/// Outcome of probing a single node: its version plus discovered peers, or why it failed.
+type ProbeOutcome = Result<(Version, Vec<SocketAddr>), ProbeError>;
+
+/// Read a Bitcoin CompactSize (varint) from the front of `payload`.
+/// Returns `(value, bytes_consumed)`.
+fn read_compact_size(payload: &[u8]) -> Result<(usize, usize), String> {
+    let first = *payload.first().ok_or("empty payload for compact size")?;
+    match first {
+        0xff => {
+            let bytes = payload.get(1..9).ok_or("truncated u64 compact size")?;
+            Ok((u64::from_le_bytes(bytes.try_into().unwrap()) as usize, 9))
+        }
+        0xfe => {
+            let bytes = payload.get(1..5).ok_or("truncated u32 compact size")?;
+            Ok((u32::from_le_bytes(bytes.try_into().unwrap()) as usize, 5))
+        }
+        0xfd => {
+            let bytes = payload.get(1..3).ok_or("truncated u16 compact size")?;
+            Ok((u16::from_le_bytes(bytes.try_into().unwrap()) as usize, 3))
+        }
+        n => Ok((n as usize, 1)),
+    }
 }
 
 impl Crawler {
@@ -17,7 +57,13 @@ impl Crawler {
             nodes: HashMap::new(),
             network,
             database: None,
+            reliable_cache: Vec::new(),
         })
+    }
+
+    /// Network this crawler is configured for.
+    pub fn network(&self) -> Network {
+        self.network
     }
 
     /// Initialize the database connection for persistent statistics tracking
@@ -97,31 +143,31 @@ impl Crawler {
     pub async fn reload_lost_nodes(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if let Some(ref db) = self.database {
             log_verbose!("Checking database for lost nodes to reload...");
-            
+
             // Get all nodes with good history that aren't in memory
             let min_protocol_version = self.network.min_protocol_version();
             let db_nodes = db.get_all_known_nodes(min_protocol_version).await?;
             let total_db_nodes = db_nodes.len();
-            
+
             let mut reloaded_count = 0;
             for node_data in db_nodes {
                 // Only reload if not already in memory
                 if !self.nodes.contains_key(&node_data.address) {
                     // Only reload nodes with good history
-                    if node_data.availability_score > 0.8 || 
-                       (node_data.days_seen >= 5 && node_data.successful_checks >= 20) {
-                        
+                    if node_data.availability_score > 0.8
+                        || (node_data.days_seen >= 5 && node_data.successful_checks >= 20)
+                    {
                         let mut node = Node::new(node_data.address, self.network);
-                        
+
                         // Set protocol version if available
                         if let Some(version) = node_data.last_protocol_version {
                             node.protocol_version = Some(version);
                         }
-                        
+
                         // Don't mark as recently seen - let the crawler verify it's still alive
                         self.nodes.insert(node_data.address, node);
                         reloaded_count += 1;
-                        
+
                         log_verbose!(
                             "Reloaded lost node {} ({}% uptime over {} days)",
                             node_data.address,
@@ -131,14 +177,17 @@ impl Crawler {
                     }
                 }
             }
-            
+
             if reloaded_count > 0 {
                 log_info!("Reloaded {} lost nodes from database", reloaded_count);
             } else {
-                log_verbose!("No lost nodes needed reloading (checked {} database nodes)", total_db_nodes);
+                log_verbose!(
+                    "No lost nodes needed reloading (checked {} database nodes)",
+                    total_db_nodes
+                );
             }
         }
-        
+
         Ok(())
     }
 
@@ -229,8 +278,6 @@ impl Crawler {
             }
         } else {
             // Handle nodes without version information
-            let node_was_new = !self.nodes.contains_key(&address);
-
             let node_status = {
                 let node = self.nodes.entry(address).or_insert_with(|| {
                     log_verbose!("Adding new node: {}", address);
@@ -248,20 +295,12 @@ impl Crawler {
                     }
                     crate::bitcoin::protocol::NodeStatusReason::Unknown => {
                         log_verbose!("  Status: ? UNKNOWN");
-                        // For unknown status nodes, we still want to persist them to database
-                        // but not as a successful/failed health check - just as a discovery
-                        if node_was_new {
-                            // Record newly discovered nodes to database as a basic entry
-                            if let Some(ref db) = self.database
-                                && let Err(e) = db.record_failed_check(address).await {
-                                    log_error!(
-                                        "Failed to record new node discovery for {}: {}",
-                                        address,
-                                        e
-                                    );
-                                }
-                        }
-                        return; // Don't proceed to health check recording
+                        // A freshly discovered peer with no version info yet is not a
+                        // failed health check. Recording it as a failure deflated the
+                        // availability score and skewed reliability ranking / load
+                        // filtering. Keep it in memory only; it gets a real check when
+                        // the crawler actually probes it.
+                        return; // Don't record a health check for a bare discovery
                     }
                     reason => {
                         log_verbose!("  Status: ✗ BAD - {}", reason);
@@ -336,17 +375,35 @@ impl Crawler {
                         );
                         return reliable_nodes;
                     } else {
-                        log_verbose!("No reliable nodes found in database, falling back to current good nodes");
+                        log_verbose!(
+                            "No reliable nodes found in database, falling back to current good nodes"
+                        );
                     }
                 }
                 Err(e) => {
-                    log_error!("Failed to get reliable nodes from database: {}, falling back to current good nodes", e);
+                    log_error!(
+                        "Failed to get reliable nodes from database: {}, falling back to current good nodes",
+                        e
+                    );
                 }
             }
         }
 
         // Fallback to existing logic
         self.get_top_good_nodes(count)
+    }
+
+    /// Recompute the reliable-node cache. Called once per crawl (under the lock)
+    /// so DNS queries can be served from memory instead of running a 30-day DB
+    /// aggregation per request while contending for the seeder lock.
+    async fn refresh_reliable_cache(&mut self) {
+        // ponytail: cache 25, DNS serves 10; recompute per crawl not per query.
+        self.reliable_cache = self.get_top_reliable_nodes(25).await;
+    }
+
+    /// Serve reliable nodes from the in-memory cache (no DB, no await).
+    pub fn get_cached_reliable_nodes(&self, count: usize) -> Vec<SocketAddr> {
+        self.reliable_cache.iter().take(count).copied().collect()
     }
 
     /// Get count of good vs bad nodes
@@ -611,59 +668,34 @@ impl Crawler {
         }
     }
 
-    pub async fn crawl_with_verbose(&mut self, verbose: bool) -> std::io::Result<()> {
-        let (good, bad) = self.get_node_stats();
-
-        if verbose {
-            log_verbose!("=== Crawl Status ===");
-            log_verbose!("Total nodes: {}", self.nodes.len());
-            log_verbose!(
-                "Good nodes: {} ({}%)",
-                good,
-                if !self.nodes.is_empty() {
-                    good * 100 / self.nodes.len()
-                } else {
-                    0
-                }
-            );
-            log_verbose!(
-                "Bad nodes: {} ({}%)",
-                bad,
-                if !self.nodes.is_empty() {
-                    bad * 100 / self.nodes.len()
-                } else {
-                    0
-                }
-            );
-        }
-
+    /// Select which nodes to probe this crawl round, prioritised (good first,
+    /// then fewest attempts). Mutates only bookkeeping (blacklist-attempt reset)
+    /// and returns the address list so the actual network probing can run
+    /// WITHOUT holding the seeder lock. See [`start_crawling_with_shared_seeder`].
+    async fn select_nodes_to_crawl(&mut self, verbose: bool) -> Vec<SocketAddr> {
         if self.nodes.is_empty() {
             log_verbose!("No nodes to crawl. Loading seed servers...");
-            self.load_seed_servers().await?;
-            return Ok(());
+            if let Err(e) = self.load_seed_servers().await {
+                log_error!("Failed to load seed servers: {}", e);
+            }
+            return Vec::new();
         }
 
-        // Get a list of nodes to try connecting to - prioritize good nodes first
         let mut eligible_nodes: Vec<&Node> = self
             .nodes
             .values()
             .filter(|node| node.should_retry_connection())
             .collect();
 
-        // Sort by priority: Good nodes first, then by connection attempts (fewer attempts = higher priority)
+        // Good nodes first, then fewest connection attempts (more reliable first)
         eligible_nodes.sort_by(|a, b| {
             use crate::bitcoin::protocol::NodeStatusReason;
             let a_is_good = matches!(a.get_status_reason(), NodeStatusReason::Good);
             let b_is_good = matches!(b.get_status_reason(), NodeStatusReason::Good);
-
-            // Primary sort: Good nodes first
             match (a_is_good, b_is_good) {
                 (true, false) => std::cmp::Ordering::Less,
                 (false, true) => std::cmp::Ordering::Greater,
-                _ => {
-                    // Secondary sort: Fewer connection attempts first (more reliable nodes)
-                    a.connection_attempts.cmp(&b.connection_attempts)
-                }
+                _ => a.connection_attempts.cmp(&b.connection_attempts),
             }
         });
 
@@ -674,133 +706,82 @@ impl Crawler {
 
         if nodes_to_crawl.is_empty() {
             log_verbose!("No nodes available for crawling at this time.");
-            log_verbose!("Showing current node status:");
-            if crate::logging::is_verbose() {
-                self.print_detailed_node_status();
-            }
-            return Ok(());
+            return Vec::new();
         }
 
-        // Log which nodes are being selected with their status
+        // Reset connection attempts for blacklisted nodes getting a second chance
+        // (they only became eligible again after the 24h blacklist window).
+        for addr in &nodes_to_crawl {
+            if let Some(node) = self.nodes.get_mut(addr)
+                && node.connection_attempts > 5
+            {
+                log_verbose!(
+                    "  → Resetting connection attempts for blacklisted node {} (was {})",
+                    addr,
+                    node.connection_attempts
+                );
+                node.reset_connection_attempts();
+            }
+        }
+
         if verbose {
-            log_verbose!("Selected nodes for crawling (prioritized):");
-            for addr in &nodes_to_crawl {
-                if let Some(node) = self.nodes.get(addr) {
-                    log_verbose!(
-                        "  {} - Status: {} (attempts: {})",
-                        addr,
-                        node.get_status_reason(),
-                        node.connection_attempts
-                    );
-                }
-            }
+            log_verbose!("Selected {} nodes for crawling", nodes_to_crawl.len());
         }
-
-        log_verbose!(
-            "Attempting to connect to {} nodes for peer discovery...",
-            nodes_to_crawl.len()
-        );
-
-        for addr in nodes_to_crawl {
-            log_verbose!("Connecting to node: {}", addr);
-
-            // CRITICAL FIX: Reset connection attempts for blacklisted nodes getting a second chance
-            if let Some(node) = self.nodes.get_mut(&addr)
-                && node.connection_attempts > 5 {
-                    // This node was blacklisted but is now eligible for retry (24h+ passed)
-                    log_verbose!("  → Resetting connection attempts for blacklisted node {} (was {} attempts)", addr, node.connection_attempts);
-                    node.reset_connection_attempts();
-                }
-
-            match self.connect_and_discover_peers_async(addr).await {
-                Ok(new_peers) => {
-                    if new_peers > 0 {
-                        log_verbose!("  ✓ Discovered {} new peers from {}", new_peers, addr);
-                    } else {
-                        log_verbose!("  - No new peers discovered from {}", addr);
-                    }
-                }
-                Err(e) => {
-                    log_verbose!("  ✗ Failed to connect to {}: {}", addr, e);
-                    // Record the connection failure
-                    if let Some(node) = self.nodes.get_mut(&addr) {
-                        node.record_connection_failure(e.to_string());
-                        log_verbose!(
-                            "    → Connection failure recorded (attempt #{})",
-                            node.connection_attempts
-                        );
-                    }
-                }
-            }
-        }
-
-        // Show summary after crawl
-        let (good_after, bad_after) = self.get_node_stats();
-        if good_after != good || bad_after != bad {
-            log_verbose!(
-                "Node status changed: {} good (+{}), {} bad (+{})",
-                good_after,
-                good_after as i32 - good as i32,
-                bad_after,
-                bad_after as i32 - bad as i32
-            );
-        }
-
-        Ok(())
+        nodes_to_crawl
     }
 
-    /// Async implementation for non-blocking peer discovery
-    async fn connect_and_discover_peers_async(
-        &mut self,
-        addr: SocketAddr,
-    ) -> std::io::Result<usize> {
-        use tokio::net::TcpStream;
-        use tokio::time::{timeout, Duration};
-
-        log_verbose!("  Attempting async TCP connection to {}...", addr);
-
-        // Use non-blocking connection with timeout
-        match timeout(Duration::from_secs(10), TcpStream::connect(addr)).await {
-            Ok(Ok(stream)) => {
-                log_verbose!("  ✓ Async TCP connection established to {}", addr);
-
-                // Attempt async Bitcoin protocol handshake
-                match self.perform_async_handshake(stream, addr).await {
-                    Ok((version, peer_addrs)) => {
-                        // Update the node with version info
-                        self.add_or_update_node(addr, Some(&version)).await;
-                        // Return the count of new peers discovered
-                        let mut new_peer_count = 0;
-                        for peer_addr in peer_addrs {
-                            if !self.nodes.contains_key(&peer_addr) {
-                                log_verbose!("    Found new peer: {}", peer_addr);
-                                self.add_or_update_node(peer_addr, None).await;
-                                new_peer_count += 1;
-                            }
-                        }
-                        Ok(new_peer_count)
-                    }
-                    Err(e) => {
-                        log_verbose!("  ✗ Async handshake failed: {}", e);
-                        if let Some(node) = self.nodes.get_mut(&addr) {
-                            node.record_handshake_failure(e.clone());
-                        }
-                        Err(std::io::Error::other(e))
+    /// Apply the outcome of a single node probe back into memory + the database.
+    /// Called under the seeder lock, but only briefly per node.
+    async fn apply_probe_result(&mut self, addr: SocketAddr, result: ProbeOutcome) {
+        match result {
+            Ok((version, peer_addrs)) => {
+                self.add_or_update_node(addr, Some(&version)).await;
+                let mut new_peer_count = 0;
+                for peer_addr in peer_addrs {
+                    if !self.nodes.contains_key(&peer_addr) {
+                        self.add_or_update_node(peer_addr, None).await;
+                        new_peer_count += 1;
                     }
                 }
+                if new_peer_count > 0 {
+                    log_verbose!("  ✓ Discovered {} new peers from {}", new_peer_count, addr);
+                }
             }
-            Ok(Err(e)) => {
-                log_verbose!("  ✗ Async TCP connection failed to {}: {}", addr, e);
-                Err(e)
+            Err(ProbeError::Connect(e)) => {
+                log_verbose!("  ✗ Connection failed for {}: {}", addr, e);
+                if let Some(node) = self.nodes.get_mut(&addr) {
+                    node.record_connection_failure(e);
+                }
             }
-            Err(_) => {
-                log_verbose!("  ✗ TCP connection timed out after 10 seconds: {}", addr);
-                Err(std::io::Error::new(
-                    std::io::ErrorKind::TimedOut,
-                    "Connection timeout",
-                ))
+            Err(ProbeError::Handshake(e)) => {
+                log_verbose!("  ✗ Handshake failed for {}: {}", addr, e);
+                if let Some(node) = self.nodes.get_mut(&addr) {
+                    node.record_handshake_failure(e);
+                }
             }
         }
+    }
+}
+
+impl Prober {
+    fn new(network: Network) -> Self {
+        Prober { network }
+    }
+
+    /// Connect to a node and run the handshake + getaddr exchange. Read-only
+    /// (holds no Crawler state), so it can run concurrently outside the lock.
+    async fn probe_node(&self, addr: SocketAddr) -> ProbeOutcome {
+        use tokio::net::TcpStream;
+        use tokio::time::{Duration, timeout};
+
+        let stream = timeout(Duration::from_secs(10), TcpStream::connect(addr))
+            .await
+            .map_err(|_| ProbeError::Connect("TCP connection timeout".to_string()))?
+            .map_err(|e| ProbeError::Connect(format!("TCP connection failed: {e}")))?;
+
+        self.perform_async_handshake(stream, addr)
+            .await
+            .map_err(ProbeError::Handshake)
     }
 
     /// Perform async handshake with a peer and collect addresses
@@ -811,7 +792,7 @@ impl Crawler {
     ) -> Result<(crate::bitcoin::protocol::message::Version, Vec<SocketAddr>), String> {
         use sha2::{Digest, Sha256};
         use tokio::io::AsyncWriteExt;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         log_verbose!("  → Performing async handshake with {}", addr);
 
@@ -895,7 +876,7 @@ impl Crawler {
         stream: &mut tokio::net::TcpStream,
     ) -> Result<crate::bitcoin::protocol::message::Version, String> {
         use tokio::io::AsyncReadExt;
-        use tokio::time::{timeout, Duration};
+        use tokio::time::{Duration, timeout};
 
         // Read message header (24 bytes)
         let mut header = [0u8; 24];
@@ -917,9 +898,7 @@ impl Crawler {
         let command = String::from_utf8_lossy(&header[4..16]);
         let command_str = command.trim_end_matches('\0');
         if command_str != "version" {
-            return Err(format!(
-                "Expected 'version' response, got '{command_str}'"
-            ));
+            return Err(format!("Expected 'version' response, got '{command_str}'"));
         }
 
         // Parse payload length
@@ -948,7 +927,7 @@ impl Crawler {
     ) -> Result<Vec<SocketAddr>, String> {
         use sha2::{Digest, Sha256};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
-        use tokio::time::{sleep, timeout, Duration};
+        use tokio::time::{Duration, sleep, timeout};
 
         let magic_bytes = self.network.magic_bytes();
 
@@ -1020,10 +999,13 @@ impl Crawler {
                             // Handle ping by sending pong
                             if payload_length > 0 {
                                 let mut ping_payload = vec![0u8; payload_length];
-                                timeout(Duration::from_secs(2), stream.read_exact(&mut ping_payload))
-                                    .await
-                                    .map_err(|_| "Timeout reading ping payload".to_string())?
-                                    .map_err(|e| format!("Failed to read ping payload: {e}"))?;
+                                timeout(
+                                    Duration::from_secs(2),
+                                    stream.read_exact(&mut ping_payload),
+                                )
+                                .await
+                                .map_err(|_| "Timeout reading ping payload".to_string())?
+                                .map_err(|e| format!("Failed to read ping payload: {e}"))?;
 
                                 // Send pong response
                                 let mut pong_message = Vec::new();
@@ -1161,15 +1143,11 @@ impl Crawler {
             return Ok(Vec::new());
         }
 
-        let mut offset = 0;
-
-        // Read variable-length integer for address count
-        if offset >= payload.len() {
-            return Err("Invalid addr count encoding".to_string());
-        }
-
-        let addr_count = payload[offset] as usize;
-        offset += 1;
+        // Read the CompactSize (Bitcoin varint) address count. The previous code
+        // read a single byte, which mis-parsed every addr message using the
+        // 0xfd/0xfe/0xff multi-byte forms (i.e. any count >= 253 — standard nodes
+        // send up to 1000 addrs), crippling peer discovery.
+        let (addr_count, mut offset) = read_compact_size(payload)?;
 
         if addr_count > 1000 {
             return Err("addr count too large".to_string());
@@ -1394,34 +1372,78 @@ pub async fn start_crawling_with_shared_seeder(
         }
     });
 
+    // Network is fixed for the process; capture it once so probes don't need the lock.
+    let prober = {
+        let seeder = shared_seeder.lock().await;
+        Prober::new(seeder.network())
+    };
+
+    // Bounded concurrency for probes. Node probing runs OUTSIDE the seeder lock,
+    // so DNS serving, stats, and reloads are never blocked by a slow/dead peer.
+    // ponytail: fixed cap of 32; tune if crawl throughput matters.
+    const MAX_CONCURRENT_PROBES: usize = 32;
+
     // Start crawling process
     let mut crawl_count = 0;
     loop {
         crawl_count += 1;
-        
-        // Every 10 crawls (approximately every 10 hours), reload lost nodes from database
+
+        // Every 10 crawls (~10 hours), reload lost nodes from database
         if crawl_count % 10 == 0 {
             let reload_result = {
                 let mut seeder = shared_seeder.lock().await;
                 seeder.reload_lost_nodes().await
             };
-            
             if let Err(e) = reload_result {
                 log_error!("Failed to reload lost nodes: {}", e);
             }
         }
-        
-        let crawl_result = {
+
+        // 1) Select nodes to crawl (brief lock).
+        let nodes_to_crawl = {
             let mut seeder = shared_seeder.lock().await;
-            seeder.crawl_with_verbose(verbose).await
+            seeder.select_nodes_to_crawl(verbose).await
         };
 
-        if let Err(e) = crawl_result {
-            log_error!("Crawling error: {}", e);
+        // 2) Probe them concurrently, WITHOUT the lock. Apply each result under a
+        //    short per-node lock as it completes.
+        let mut set: tokio::task::JoinSet<(SocketAddr, ProbeOutcome)> = tokio::task::JoinSet::new();
+        let mut pending = nodes_to_crawl.into_iter();
+
+        for _ in 0..MAX_CONCURRENT_PROBES {
+            if let Some(addr) = pending.next() {
+                set.spawn(async move { (addr, prober.probe_node(addr).await) });
+            } else {
+                break;
+            }
         }
 
-        // Sleep before next crawl - configurable interval (default 1 hour is sufficient for DNS seeding)
-        // since we're not a high-frequency trading system but a DNS service
+        while let Some(joined) = set.join_next().await {
+            let (addr, result) = match joined {
+                Ok(pair) => pair,
+                Err(e) => {
+                    log_error!("Probe task failed to join: {}", e);
+                    continue;
+                }
+            };
+
+            {
+                let mut seeder = shared_seeder.lock().await;
+                seeder.apply_probe_result(addr, result).await;
+            }
+
+            if let Some(next_addr) = pending.next() {
+                set.spawn(async move { (next_addr, prober.probe_node(next_addr).await) });
+            }
+        }
+
+        // 3) Refresh the DNS-served reliable-node cache once per crawl.
+        {
+            let mut seeder = shared_seeder.lock().await;
+            seeder.refresh_reliable_cache().await;
+        }
+
+        // Sleep before next crawl (default 1 hour is plenty for a DNS seeder).
         tokio::time::sleep(tokio::time::Duration::from_secs(crawl_interval_seconds)).await;
     }
 }
@@ -1457,12 +1479,12 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_secs(30)).await;
         });
 
-        let seeder = Crawler::new("127.0.0.1:0", Network::Testnet).unwrap();
+        let prober = Prober::new(Network::Testnet);
         let mut stream = TcpStream::connect(addr).await.unwrap();
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            seeder.request_peer_addresses(&mut stream),
+            prober.request_peer_addresses(&mut stream),
         )
         .await;
 
@@ -1471,6 +1493,33 @@ mod tests {
             result.is_ok(),
             "request_peer_addresses hung on a stalled addr payload"
         );
+    }
+
+    #[test]
+    fn test_read_compact_size() {
+        assert_eq!(read_compact_size(&[5]).unwrap(), (5, 1));
+        // 0xfd => next 2 bytes LE. 1000 = 0x03E8
+        assert_eq!(read_compact_size(&[0xfd, 0xe8, 0x03]).unwrap(), (1000, 3));
+        // 0xfe => next 4 bytes LE
+        assert_eq!(read_compact_size(&[0xfe, 1, 0, 0, 0]).unwrap(), (1, 5));
+        // truncated multi-byte form must error, not panic
+        assert!(read_compact_size(&[0xfd]).is_err());
+    }
+
+    #[test]
+    fn test_parse_addr_message_multibyte_varint() {
+        // A count encoded with the 0xfd form (value 1) followed by one 30-byte
+        // address entry. The old single-byte parser read 0xfd as count 253 and
+        // mis-parsed the entry; the fixed parser must decode exactly one address.
+        let prober = Prober::new(Network::Testnet);
+        let mut payload = vec![0xfd, 0x01, 0x00]; // CompactSize(1)
+        payload.extend_from_slice(&[0u8; 4]); // timestamp
+        payload.extend_from_slice(&[0u8; 8]); // services
+        payload.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4]); // ::ffff:1.2.3.4
+        payload.extend_from_slice(&9901u16.to_be_bytes()); // port
+
+        let addrs = prober.parse_addr_message(&payload).unwrap();
+        assert_eq!(addrs, vec!["1.2.3.4:9901".parse().unwrap()]);
     }
 
     #[test]

@@ -274,22 +274,29 @@ impl Node {
         if matches!(
             self.status_reason,
             NodeStatusReason::ProtocolVersionTooOld(_, _)
-        )
-            && let Some(too_old_since) = self.protocol_version_too_old_since
-                && let Ok(elapsed) = too_old_since.elapsed() {
-                    const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
-                    if elapsed.as_secs() < TWELVE_HOURS_IN_SECONDS {
-                        return false; // Don't retry within 12 hours of being marked as protocol too old
-                    }
-                }
+        ) && let Some(too_old_since) = self.protocol_version_too_old_since
+            && let Ok(elapsed) = too_old_since.elapsed()
+        {
+            const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
+            if elapsed.as_secs() < TWELVE_HOURS_IN_SECONDS {
+                return false; // Don't retry within 12 hours of being marked as protocol too old
+            }
+        }
 
-        // Always retry:
-        // 1. Unknown nodes or nodes marked as not recently seen
-        // 2. Currently good nodes (to maintain their good status)
-        // 3. Previously good nodes that have aged out (to re-validate them)
+        // Retry everything else. Crucially this includes ConnectionFailed and
+        // HandshakeFailed: without them, a node that failed even once was excluded
+        // forever (its attempt counter never grew past 1, so the 24h-blacklist
+        // recovery path above was unreachable and its status was never re-aged to
+        // NotRecentlySeen). That silently rotted every transiently-failing node to
+        // permanently bad. The 1h crawl interval is the natural retry backoff, and
+        // repeated failures still escalate to the attempts>5 blacklist above.
         matches!(
             self.status_reason,
-            NodeStatusReason::Unknown | NodeStatusReason::NotRecentlySeen | NodeStatusReason::Good
+            NodeStatusReason::Unknown
+                | NodeStatusReason::NotRecentlySeen
+                | NodeStatusReason::Good
+                | NodeStatusReason::ConnectionFailed(_)
+                | NodeStatusReason::HandshakeFailed(_)
         )
     }
 
@@ -299,15 +306,69 @@ impl Node {
         if matches!(
             self.status_reason,
             NodeStatusReason::ProtocolVersionTooOld(_, _)
-        )
-            && let Some(too_old_since) = self.protocol_version_too_old_since
-                && let Ok(elapsed) = too_old_since.elapsed() {
-                    const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
-                    let elapsed_secs = elapsed.as_secs();
-                    if elapsed_secs < TWELVE_HOURS_IN_SECONDS {
-                        return Some(TWELVE_HOURS_IN_SECONDS - elapsed_secs);
-                    }
-                }
+        ) && let Some(too_old_since) = self.protocol_version_too_old_since
+            && let Ok(elapsed) = too_old_since.elapsed()
+        {
+            const TWELVE_HOURS_IN_SECONDS: u64 = 12 * 60 * 60; // 12 hours
+            let elapsed_secs = elapsed.as_secs();
+            if elapsed_secs < TWELVE_HOURS_IN_SECONDS {
+                return Some(TWELVE_HOURS_IN_SECONDS - elapsed_secs);
+            }
+        }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_node() -> Node {
+        let addr: std::net::SocketAddr = "1.2.3.4:9901".parse().unwrap();
+        Node::new(addr, Network::Mainnet)
+    }
+
+    #[test]
+    fn failed_node_is_retried_not_permanently_blacklisted() {
+        // Regression: a single connection failure must NOT sideline a node
+        // forever. Before the fix, ConnectionFailed/HandshakeFailed were absent
+        // from the retry set, so the node was never re-probed, its attempt
+        // counter never grew, and the 24h-blacklist recovery was unreachable.
+        let mut node = test_node();
+        node.record_connection_failure("refused".to_string());
+        assert!(
+            node.should_retry_connection(),
+            "node with a single connection failure must remain retryable"
+        );
+
+        let mut node = test_node();
+        node.record_handshake_failure("bad version".to_string());
+        assert!(
+            node.should_retry_connection(),
+            "node with a handshake failure must remain retryable"
+        );
+    }
+
+    #[test]
+    fn repeatedly_failed_node_is_blacklisted_then_recovers() {
+        // >5 failures within 24h => blacklisted (not retried).
+        let mut node = test_node();
+        for _ in 0..6 {
+            node.record_connection_failure("refused".to_string());
+        }
+        assert!(node.connection_attempts > 5);
+        assert!(
+            !node.should_retry_connection(),
+            "node failing >5 times within 24h should be blacklisted"
+        );
+
+        // After 24h+ the blacklist lifts. record_* sets last_seen to now, so
+        // simulate age by backdating last_seen past the 24h window.
+        node.last_seen =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(25 * 60 * 60);
+        assert!(
+            node.should_retry_connection(),
+            "blacklisted node should become retryable after 24h"
+        );
     }
 }
