@@ -234,12 +234,6 @@ impl Node {
         matches!(self.status_reason, NodeStatusReason::Good) && self.is_recently_seen()
     }
 
-    /// Updates the last seen timestamp
-    pub fn update_last_seen(&mut self) {
-        self.last_seen = std::time::SystemTime::now();
-        self.update_status_reason();
-    }
-
     /// Checks if the node has been seen recently (within the last 2 hours)
     /// This provides buffer time for the 1-hour crawling interval
     pub fn is_recently_seen(&self) -> bool {

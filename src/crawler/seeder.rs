@@ -292,56 +292,20 @@ impl Crawler {
                 }
             }
         } else {
-            // Handle nodes without version information
-            let node_status = {
-                let node = self.nodes.entry(address).or_insert_with(|| {
-                    log_verbose!("Adding new node: {}", address);
-                    Node::new(address, self.network)
-                });
-
-                log_verbose!("Updating last seen time for node: {}", address);
-                node.update_last_seen();
-
-                // For nodes without version info, we consider them for health check but mark as uncertain
-                match node.get_status_reason() {
-                    crate::bitcoin::protocol::NodeStatusReason::Good => {
-                        log_verbose!("  Status: ✓ GOOD");
-                        true
-                    }
-                    crate::bitcoin::protocol::NodeStatusReason::Unknown => {
-                        log_verbose!("  Status: ? UNKNOWN");
-                        // A freshly discovered peer with no version info yet is not a
-                        // failed health check. Recording it as a failure deflated the
-                        // availability score and skewed reliability ranking / load
-                        // filtering. Keep it in memory only; it gets a real check when
-                        // the crawler actually probes it.
-                        return; // Don't record a health check for a bare discovery
-                    }
-                    reason => {
-                        log_verbose!("  Status: ✗ BAD - {}", reason);
-                        false
-                    }
-                }
-            };
-
-            let (protocol_version, user_agent) = {
-                let node = self.nodes.get(&address).unwrap();
-                (node.protocol_version, node.user_agent.clone())
-            };
-
-            // Record health check for nodes we just pinged (without version data)
-            if let Some(ref db) = self.database {
-                let result = if node_status {
-                    db.record_successful_check(address, protocol_version, user_agent, 30)
-                        .await
-                } else {
-                    db.record_failed_check(address).await
-                };
-
-                if let Err(e) = result {
-                    log_error!("Failed to record health check for {}: {}", address, e);
-                }
-            }
+            // No version message: this is a bare discovery -- an addr-gossip entry
+            // from a peer, or a seed / known IP. Only register the node if it's
+            // new; NEVER touch its status, last_seen, or the DB here.
+            //
+            // Critical: a node is Good ONLY after WE handshake it (the branch
+            // above). Previously this branch called update_last_seen(), which
+            // recomputed status from the node's stored protocol_version -- so any
+            // DB-loaded node that showed up in another peer's addr list was
+            // promoted to Good without ever being contacted, and the seeder served
+            // unreachable nodes. Registering must not imply reachability.
+            self.nodes.entry(address).or_insert_with(|| {
+                log_verbose!("Discovered new node: {}", address);
+                Node::new(address, self.network)
+            });
         }
     }
 
@@ -1542,6 +1506,31 @@ mod tests {
             addrs,
             vec!["1.2.3.4:9903".parse().unwrap()],
             "off-port node must be dropped"
+        );
+    }
+
+    #[tokio::test]
+    async fn gossip_does_not_promote_unhandshaked_node_to_good() {
+        // A node loaded from the DB carries a stored protocol_version but has not
+        // been handshaked this session (status Unknown). When another peer gossips
+        // its address (add_or_update_node with no version), it must NOT be promoted
+        // to Good -- only a real handshake may do that. This was the bug that made
+        // `good` snap to the full loaded count and serve unreachable nodes.
+        let mut c = Crawler::new("127.0.0.1:0", Network::Testnet).unwrap();
+        let addr: SocketAddr = "1.2.3.4:9903".parse().unwrap();
+
+        let mut n = Node::new(addr, Network::Testnet);
+        n.protocol_version = Some(70018); // as if loaded from DB
+        c.nodes.insert(addr, n);
+        assert_eq!(c.get_node_stats().0, 0, "precondition: not good yet");
+
+        // Another peer's addr list mentions this node -- no version from it.
+        c.add_or_update_node(addr, None).await;
+
+        assert_eq!(
+            c.get_node_stats().0,
+            0,
+            "gossip must not mark an un-handshaked node good"
         );
     }
 
