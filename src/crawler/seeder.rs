@@ -372,6 +372,35 @@ impl Crawler {
         (good_count, total_count - good_count)
     }
 
+    /// Diagnostic breakdown of node status + serve-cache size. Read-only.
+    pub fn debug_summary(&self) -> String {
+        use crate::bitcoin::protocol::NodeStatusReason as R;
+        let port = self.network.default_port();
+        let (mut good_status, mut unknown, mut connfail, mut hsfail, mut tooold, mut notrecent) =
+            (0, 0, 0, 0, 0, 0);
+        let (mut is_good, mut good_default_port) = (0, 0);
+        for n in self.nodes.values() {
+            match n.get_status_reason() {
+                R::Good => good_status += 1,
+                R::Unknown => unknown += 1,
+                R::ConnectionFailed(_) => connfail += 1,
+                R::HandshakeFailed(_) => hsfail += 1,
+                R::ProtocolVersionTooOld(_, _) => tooold += 1,
+                R::NotRecentlySeen => notrecent += 1,
+            }
+            if n.is_good_node() {
+                is_good += 1;
+                if n.address.port() == port {
+                    good_default_port += 1;
+                }
+            }
+        }
+        format!(
+            "DIAG status[Good={good_status} Unknown={unknown} ConnFail={connfail} HsFail={hsfail} TooOld={tooold} NotRecent={notrecent}] is_good_node={is_good} good_default_port={good_default_port} cache={}",
+            self.reliable_cache.len()
+        )
+    }
+
     /// Print a concise summary for standard mode
     fn print_node_summary(&self) {
         let (good, bad) = self.get_node_stats();
@@ -1299,6 +1328,11 @@ pub async fn start_crawling_with_shared_seeder(
             log_error!("Failed to load seed servers: {}", e);
             return;
         }
+
+        // Diagnostic: state immediately after load, before any crawl.
+        let (g, b) = seeder.get_node_stats();
+        log_info!("POST-LOAD: {} good, {} bad, {} total", g, b, g + b);
+        log_info!("{}", seeder.debug_summary());
     }
 
     // Start periodic stats reporting task (runs every 60 seconds independently of crawling)
@@ -1323,6 +1357,8 @@ pub async fn start_crawling_with_shared_seeder(
                 health_percentage,
                 dns_queries
             );
+
+            log_info!("{}", seeder.debug_summary());
 
             // In verbose mode, show additional details
             if crate::logging::is_verbose() {
@@ -1365,6 +1401,10 @@ pub async fn start_crawling_with_shared_seeder(
             let mut seeder = shared_seeder.lock().await;
             seeder.select_nodes_to_crawl(verbose).await
         };
+        let selected = nodes_to_crawl.len();
+        let mut ok_count = 0usize;
+        let mut err_count = 0usize;
+        log_info!("CRAWL {crawl_count}: selected {selected} nodes to probe");
 
         // 2) Probe them concurrently, WITHOUT the lock. Apply each result under a
         //    short per-node lock as it completes.
@@ -1388,6 +1428,12 @@ pub async fn start_crawling_with_shared_seeder(
                 }
             };
 
+            if result.is_ok() {
+                ok_count += 1;
+            } else {
+                err_count += 1;
+            }
+
             {
                 let mut seeder = shared_seeder.lock().await;
                 seeder.apply_probe_result(addr, result).await;
@@ -1403,6 +1449,7 @@ pub async fn start_crawling_with_shared_seeder(
             let mut seeder = shared_seeder.lock().await;
             seeder.refresh_reliable_cache().await;
         }
+        log_info!("CRAWL {crawl_count} done: probed {selected} (ok={ok_count}, err={err_count})");
 
         // Sleep before next crawl (default 1 hour is plenty for a DNS seeder).
         tokio::time::sleep(tokio::time::Duration::from_secs(crawl_interval_seconds)).await;
