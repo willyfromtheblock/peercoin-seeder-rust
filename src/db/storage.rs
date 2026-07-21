@@ -252,49 +252,6 @@ impl NodeDatabase {
         Ok(known_nodes)
     }
 
-    /// Get the top N most reliable nodes based on 30-day availability
-    pub async fn get_top_reliable_nodes(
-        &self,
-        count: usize,
-        min_protocol_version: u32,
-    ) -> Result<Vec<SocketAddr>, Box<dyn std::error::Error>> {
-        let metrics = self.get_availability_metrics().await?;
-
-        let mut reliable_nodes: Vec<_> = metrics
-            .into_iter()
-            .filter(|m| {
-                // Filter by protocol version and recent activity
-                m.last_protocol_version.unwrap_or(0) >= min_protocol_version &&
-                m.availability_score > 0.7 && // At least 70% availability
-                m.days_seen >= 3 && // Seen on at least 3 days
-                m.total_checks >= 10 && // At least 10 checks
-                // Seen within last 24 hours
-                (Utc::now() - m.last_seen).num_hours() < 24
-            })
-            .collect();
-
-        // Sort by availability score (highest first), then by days seen, then by total successful checks
-        reliable_nodes.sort_by(|a, b| {
-            b.availability_score
-                .partial_cmp(&a.availability_score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| b.days_seen.cmp(&a.days_seen))
-                .then_with(|| b.successful_checks.cmp(&a.successful_checks))
-        });
-
-        let top_addresses: Vec<SocketAddr> = reliable_nodes
-            .into_iter()
-            .take(count)
-            .map(|m| m.address)
-            .collect();
-
-        log_verbose!(
-            "Found {} reliable nodes meeting criteria",
-            top_addresses.len()
-        );
-        Ok(top_addresses)
-    }
-
     /// Clean up old data (older than 30 days)
     pub async fn cleanup_old_data(&self) -> Result<u64, Box<dyn std::error::Error>> {
         let thirty_days_ago = Utc::now() - chrono::Duration::days(30);

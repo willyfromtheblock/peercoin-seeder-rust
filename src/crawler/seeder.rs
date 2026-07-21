@@ -98,16 +98,27 @@ impl Crawler {
                     let mut loaded_count = 0;
 
                     for node_data in nodes_data {
+                        // Skip legacy off-port entries: only standard-port nodes
+                        // can be served via DNS, so don't track anything else.
+                        if node_data.address.port() != self.network.default_port() {
+                            continue;
+                        }
+
                         // Create a new Node instance with database information
                         let mut node = Node::new(node_data.address, self.network);
 
-                        // Set protocol version and user agent if available
+                        // Set protocol version if available (informational only;
+                        // status stays Unknown until we actually handshake it).
                         if let Some(version) = node_data.last_protocol_version {
                             node.protocol_version = Some(version);
                         }
 
-                        // Mark the node as recently seen to avoid immediate re-checking
-                        node.update_last_seen();
+                        // Do NOT mark as good/recently-verified here. The previous
+                        // code called update_last_seen(), which recomputed status to
+                        // Good from the stored protocol version WITHOUT contacting the
+                        // node — so on every restart `good` spiked with unverified,
+                        // possibly-dead nodes and DNS served them. Leave it Unknown so
+                        // the crawler must confirm it by a real handshake first.
 
                         // Insert into the HashMap
                         self.nodes.insert(node_data.address, node);
@@ -151,6 +162,10 @@ impl Crawler {
 
             let mut reloaded_count = 0;
             for node_data in db_nodes {
+                // Only standard-port nodes are servable via DNS; skip the rest.
+                if node_data.address.port() != self.network.default_port() {
+                    continue;
+                }
                 // Only reload if not already in memory
                 if !self.nodes.contains_key(&node_data.address) {
                     // Only reload nodes with good history
@@ -359,46 +374,22 @@ impl Crawler {
             .collect()
     }
 
-    /// Get the top N reliable nodes based on 30-day historical availability
-    /// Falls back to current good nodes if database is not available
-    pub async fn get_top_reliable_nodes(&self, count: usize) -> Vec<SocketAddr> {
-        if let Some(ref db) = self.database {
-            // Use minimum protocol version from the network configuration
-            let min_protocol_version = self.network.min_protocol_version();
-
-            match db.get_top_reliable_nodes(count, min_protocol_version).await {
-                Ok(reliable_nodes) => {
-                    if !reliable_nodes.is_empty() {
-                        log_verbose!(
-                            "Retrieved {} reliable nodes from database (30-day history)",
-                            reliable_nodes.len()
-                        );
-                        return reliable_nodes;
-                    } else {
-                        log_verbose!(
-                            "No reliable nodes found in database, falling back to current good nodes"
-                        );
-                    }
-                }
-                Err(e) => {
-                    log_error!(
-                        "Failed to get reliable nodes from database: {}, falling back to current good nodes",
-                        e
-                    );
-                }
-            }
-        }
-
-        // Fallback to existing logic
-        self.get_top_good_nodes(count)
-    }
-
-    /// Recompute the reliable-node cache. Called once per crawl (under the lock)
-    /// so DNS queries can be served from memory instead of running a 30-day DB
-    /// aggregation per request while contending for the seeder lock.
+    /// Recompute the DNS-served node cache. Called once per crawl (under the
+    /// lock) so DNS queries are served from memory instead of scanning nodes /
+    /// hitting the DB per request while holding the seeder lock.
     async fn refresh_reliable_cache(&mut self) {
-        // ponytail: cache 25, DNS serves 10; recompute per crawl not per query.
-        self.reliable_cache = self.get_top_reliable_nodes(25).await;
+        let port = self.network.default_port();
+        // Serve only freshly-verified good nodes ON THE STANDARD PORT. A DNS A
+        // record carries no port, so a node on any other port is unreachable for
+        // clients that always dial the default port. get_top_good_nodes already
+        // requires a successful recent handshake (is_good_node), so this is
+        // current reachability, not stale 30-day history.
+        self.reliable_cache = self
+            .get_top_good_nodes(usize::MAX)
+            .into_iter()
+            .filter(|addr| addr.port() == port)
+            .take(25)
+            .collect();
     }
 
     /// Serve reliable nodes from the in-memory cache (no DB, no await).
@@ -1182,8 +1173,14 @@ impl Prober {
             } else {
                 std::net::IpAddr::V6(ipv6_addr)
             };
-            let socket_addr = SocketAddr::new(ip_addr, port);
-            addresses.push(socket_addr);
+            // Only track nodes on the network's standard port. A DNS A record
+            // carries no port, so a node on any other port can never be
+            // advertised correctly (clients always dial the default port).
+            // Gate at ingestion so off-port peers are never tracked, probed,
+            // counted good, or served.
+            if port == self.network.default_port() {
+                addresses.push(SocketAddr::new(ip_addr, port));
+            }
         }
 
         Ok(addresses)
@@ -1506,20 +1503,46 @@ mod tests {
         assert!(read_compact_size(&[0xfd]).is_err());
     }
 
+    /// Build a 30-byte addr entry for ::ffff:1.2.3.4 on `port`.
+    #[cfg(test)]
+    fn addr_entry(port: u16) -> Vec<u8> {
+        let mut e = Vec::new();
+        e.extend_from_slice(&[0u8; 4]); // timestamp
+        e.extend_from_slice(&[0u8; 8]); // services
+        e.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4]); // ::ffff:1.2.3.4
+        e.extend_from_slice(&port.to_be_bytes());
+        e
+    }
+
     #[test]
     fn test_parse_addr_message_multibyte_varint() {
         // A count encoded with the 0xfd form (value 1) followed by one 30-byte
         // address entry. The old single-byte parser read 0xfd as count 253 and
         // mis-parsed the entry; the fixed parser must decode exactly one address.
+        // Use the testnet default port so it survives the standard-port gate.
         let prober = Prober::new(Network::Testnet);
         let mut payload = vec![0xfd, 0x01, 0x00]; // CompactSize(1)
-        payload.extend_from_slice(&[0u8; 4]); // timestamp
-        payload.extend_from_slice(&[0u8; 8]); // services
-        payload.extend_from_slice(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 1, 2, 3, 4]); // ::ffff:1.2.3.4
-        payload.extend_from_slice(&9901u16.to_be_bytes()); // port
+        payload.extend_from_slice(&addr_entry(9903));
 
         let addrs = prober.parse_addr_message(&payload).unwrap();
-        assert_eq!(addrs, vec!["1.2.3.4:9901".parse().unwrap()]);
+        assert_eq!(addrs, vec!["1.2.3.4:9903".parse().unwrap()]);
+    }
+
+    #[test]
+    fn test_parse_addr_message_gates_nonstandard_port() {
+        // Two entries: one on the standard port, one off-port. Only the
+        // standard-port node may be tracked (DNS A records carry no port).
+        let prober = Prober::new(Network::Testnet); // default 9903
+        let mut payload = vec![0x02]; // CompactSize(2)
+        payload.extend_from_slice(&addr_entry(9903)); // standard
+        payload.extend_from_slice(&addr_entry(12345)); // off-port
+
+        let addrs = prober.parse_addr_message(&payload).unwrap();
+        assert_eq!(
+            addrs,
+            vec!["1.2.3.4:9903".parse().unwrap()],
+            "off-port node must be dropped"
+        );
     }
 
     #[test]
