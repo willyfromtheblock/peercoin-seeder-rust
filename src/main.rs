@@ -131,10 +131,6 @@ async fn main() {
 
     // Use the new logging system
     crate::log_info!("Starting Peercoin seeder...");
-    crate::log_info!(
-        "build marker: diag1 v{} (handshake-only-good)",
-        env!("CARGO_PKG_VERSION")
-    );
     crate::log_info!("Using network: {}", config.network);
 
     if let Some(ref hostname) = config.hostname {
